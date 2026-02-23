@@ -8,6 +8,8 @@ import TransactionsPage from './pages/TransactionsPage';
 import AgentsPage from './pages/AgentsPage';
 import EmployeesPage from './pages/EmployeesPage';
 import ExpensesPage from './pages/ExpensesPage';
+import ConversionAgentsPage from './pages/ConversionAgentsPage';
+import CreditsPage from './pages/CreditsPage';
 
 export default function App() {
   return (
@@ -39,13 +41,22 @@ export default function App() {
             <ProtectedRoute><TransactionsPage /></ProtectedRoute>
           } />
 
-          {/* Super admin only */}
+          {/* Collector + Super Admin */}
+          <Route path="/conversion-agents" element={
+            <ProtectedRoute roles={['superadmin', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
+          } />
+          <Route path="/credits" element={
+            <ProtectedRoute roles={['superadmin', 'collector']}><CreditsPage /></ProtectedRoute>
+          } />
+
+          {/* Super admin + Collector — agent/employee management */}
           <Route path="/agents" element={
-            <ProtectedRoute roles={['superadmin']}><AgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['superadmin', 'collector']}><AgentsPage /></ProtectedRoute>
           } />
           <Route path="/employees" element={
-            <ProtectedRoute roles={['superadmin']}><EmployeesPage /></ProtectedRoute>
+            <ProtectedRoute roles={['superadmin', 'collector']}><EmployeesPage /></ProtectedRoute>
           } />
+          {/* Super admin only */}
           <Route path="/expenses" element={
             <ProtectedRoute roles={['superadmin']}><ExpensesPage /></ProtectedRoute>
           } />

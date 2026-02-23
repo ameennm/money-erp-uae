@@ -9,8 +9,10 @@ const EMPTY = { name: '', email: '', password: '', role: 'employee', notes: '' }
 
 export default function EmployeesPage() {
     const [employees, setEmployees] = useState([]);
+    const [txs, setTxs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
+    const [viewingEmp, setViewingEmp] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
     const [showPw, setShowPw] = useState(false);
@@ -19,8 +21,12 @@ export default function EmployeesPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const r = await dbService.listEmployees();
-            setEmployees(r.documents);
+            const [er, tr] = await Promise.all([
+                dbService.listEmployees(),
+                dbService.listTransactions(),
+            ]);
+            setEmployees(er.documents);
+            setTxs(tr.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -29,6 +35,8 @@ export default function EmployeesPage() {
     };
 
     useEffect(() => { fetch(); }, []);
+
+    const getEmpTxs = (empId) => txs.filter(t => t.creator_id === empId);
 
     const generatePassword = () => {
         const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#';
@@ -83,6 +91,7 @@ export default function EmployeesPage() {
     const roleBadge = (r) => {
         if (r === 'collector') return <span className="badge badge-collector">Collector</span>;
         if (r === 'superadmin') return <span className="badge badge-superadmin">Super Admin</span>;
+        if (r === 'distributor') return <span className="badge badge-inprogress">Distributor</span>;
         return <span className="badge badge-employee">Employee</span>;
     };
 
@@ -154,7 +163,16 @@ export default function EmployeesPage() {
                                                 }}>
                                                     {emp.name?.[0]?.toUpperCase()}
                                                 </div>
-                                                {emp.name}
+                                                <button
+                                                    onClick={() => setViewingEmp(emp)}
+                                                    style={{
+                                                        background: 'none', border: 'none', padding: 0,
+                                                        fontWeight: 'inherit', cursor: 'pointer',
+                                                        textDecoration: 'underline', color: 'var(--brand-accent)'
+                                                    }}
+                                                >
+                                                    {emp.name}
+                                                </button>
                                             </div>
                                         </td>
                                         <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{emp.email}</td>
@@ -185,6 +203,75 @@ export default function EmployeesPage() {
                 </div>
             )}
 
+            {/* History Modal */}
+            {viewingEmp && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingEmp(null)}>
+                    <div className="modal" style={{ maxWidth: '800px' }}>
+                        <div className="modal-header">
+                            <div>
+                                <h3 className="modal-title">Employee Logs: {viewingEmp.name}</h3>
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                    Activity history for this {viewingEmp.role}
+                                </div>
+                            </div>
+                            <button className="close-btn" onClick={() => setViewingEmp(null)}><X size={20} /></button>
+                        </div>
+                        <div className="modal-body">
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                                <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Created Transactions</div>
+                                    <div style={{ fontSize: '20px', fontWeight: 800 }}>
+                                        {getEmpTxs(viewingEmp.$id).length}
+                                    </div>
+                                </div>
+                                <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total SAR Created</div>
+                                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                        {getEmpTxs(viewingEmp.$id).reduce((sum, t) => sum + (Number(t.amount_sar) || 0), 0).toLocaleString()} SAR
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>ID</th>
+                                            <th>Client</th>
+                                            <th>SAR</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {getEmpTxs(viewingEmp.$id).length === 0 ? (
+                                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No transactions recorded by this employee yet.</td></tr>
+                                        ) : (
+                                            getEmpTxs(viewingEmp.$id).map(t => (
+                                                <tr key={t.$id}>
+                                                    <td style={{ fontSize: '12px' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}</td>
+                                                    <td style={{ fontWeight: 700, fontSize: '12px' }}>#{t.tx_id}</td>
+                                                    <td>{t.client_name}</td>
+                                                    <td style={{ fontWeight: 600 }}>{Number(t.amount_sar).toLocaleString()}</td>
+                                                    <td>
+                                                        <span className={`badge badge-${t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'failed' : 'pending'}`}>
+                                                            {t.status}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-outline" onClick={() => setViewingEmp(null)}>Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Modal */}
             {modal && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(false)}>
@@ -204,6 +291,9 @@ export default function EmployeesPage() {
                                     <label className="form-label">Email Address *</label>
                                     <input id="emp-email" className="form-input" type="email" placeholder="employee@moneytransfer.com"
                                         value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                        Must end with @collector.moneytransfer.com or @distributor.moneytransfer.com if applicable.
+                                    </div>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Password *</label>
@@ -232,8 +322,17 @@ export default function EmployeesPage() {
                                 <div className="form-group">
                                     <label className="form-label">Role *</label>
                                     <select id="emp-role" className="form-select"
-                                        value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-                                        <option value="employee">Employee (AED → INR)</option>
+                                        value={form.role} onChange={e => {
+                                            const role = e.target.value;
+                                            let email = form.email.split('@')[0];
+                                            let domain = '@moneytransfer.com';
+                                            if (role === 'collector') domain = '@collector.moneytransfer.com';
+                                            if (role === 'distributor') domain = '@distributor.moneytransfer.com';
+                                            if (role === 'employee') domain = '@employee.moneytransfer.com';
+                                            setForm({ ...form, role, email: email + domain });
+                                        }}>
+                                        <option value="employee">Employee (Completer)</option>
+                                        <option value="distributor">Distributor (Assigner / Approver)</option>
                                         <option value="collector">Collector (SAR logging)</option>
                                     </select>
                                 </div>

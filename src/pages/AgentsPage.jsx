@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react';
 import { dbService } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Pencil, Trash2, Users, Phone, MapPin } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, List } from 'lucide-react';
+import { format } from 'date-fns';
 
 const EMPTY = { name: '', phone: '', location: '', notes: '' };
 
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
+    const [txs, setTxs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
+    const [viewingAgent, setViewingAgent] = useState(null);
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
@@ -17,8 +20,12 @@ export default function AgentsPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const r = await dbService.listAgents();
-            setAgents(r.documents);
+            const [ar, tr] = await Promise.all([
+                dbService.listAgents(),
+                dbService.listTransactions(),
+            ]);
+            setAgents(ar.documents);
+            setTxs(tr.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -33,6 +40,10 @@ export default function AgentsPage() {
         setEditItem(a);
         setForm({ name: a.name || '', phone: a.phone || '', location: a.location || '', notes: a.notes || '' });
         setModal(true);
+    };
+
+    const openHistory = (a) => {
+        setViewingAgent(a);
     };
 
     const handleSave = async (e) => {
@@ -65,6 +76,8 @@ export default function AgentsPage() {
             toast.error(e.message);
         }
     };
+
+    const getAgentTxs = (agentId) => txs.filter(t => t.agent_id === agentId);
 
     return (
         <Layout title="Agents">
@@ -116,7 +129,16 @@ export default function AgentsPage() {
                                                 }}>
                                                     {a.name?.[0]?.toUpperCase()}
                                                 </div>
-                                                {a.name}
+                                                <button
+                                                    onClick={() => openHistory(a)}
+                                                    style={{
+                                                        background: 'none', border: 'none', padding: 0,
+                                                        fontWeight: 'inherit', cursor: 'pointer',
+                                                        textDecoration: 'underline', color: 'var(--brand-accent)'
+                                                    }}
+                                                >
+                                                    {a.name}
+                                                </button>
                                             </div>
                                         </td>
                                         <td>
@@ -144,6 +166,75 @@ export default function AgentsPage() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* History Modal */}
+            {viewingAgent && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
+                    <div className="modal" style={{ maxWidth: '800px' }}>
+                        <div className="modal-header">
+                            <div>
+                                <h3 className="modal-title">Transaction History: {viewingAgent.name}</h3>
+                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                    Showing all transactions collected by this agent
+                                </div>
+                            </div>
+                            <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                        </div>
+                        <div className="modal-body">
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                                <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total SAR Collected</div>
+                                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                        {getAgentTxs(viewingAgent.$id).reduce((sum, t) => sum + (Number(t.amount_sar) || 0), 0).toLocaleString()} SAR
+                                    </div>
+                                </div>
+                                <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pending SAR</div>
+                                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                        {getAgentTxs(viewingAgent.$id).filter(t => t.status === 'pending').reduce((sum, t) => sum + (Number(t.amount_sar) || 0), 0).toLocaleString()} SAR
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>ID</th>
+                                            <th>Client</th>
+                                            <th>SAR</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {getAgentTxs(viewingAgent.$id).length === 0 ? (
+                                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No transactions found for this agent.</td></tr>
+                                        ) : (
+                                            getAgentTxs(viewingAgent.$id).map(t => (
+                                                <tr key={t.$id}>
+                                                    <td style={{ fontSize: '12px' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}</td>
+                                                    <td style={{ fontWeight: 700, fontSize: '12px' }}>#{t.tx_id}</td>
+                                                    <td>{t.client_name}</td>
+                                                    <td style={{ fontWeight: 600 }}>{Number(t.amount_sar).toLocaleString()}</td>
+                                                    <td>
+                                                        <span className={`badge badge-${t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'failed' : 'pending'}`}>
+                                                            {t.status}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-outline" onClick={() => setViewingAgent(null)}>Close</button>
+                        </div>
                     </div>
                 </div>
             )}
