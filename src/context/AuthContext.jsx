@@ -3,22 +3,16 @@ import { authService } from '../lib/appwrite';
 
 const AuthContext = createContext(null);
 
-// Super-admin email
-const SUPER_ADMIN_EMAIL = 'admin@moneytransfer.com';
-const COLLECTOR_EMAIL_SUFFIX = '@collector.moneytransfer.com';
-const DISTRIBUTOR_EMAIL_SUFFIX = '@distributor.moneytransfer.com';
-
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
-    const [role, setRole] = useState(null); // 'superadmin' | 'collector' | 'employee' | 'distributor'
+    const [role, setRole] = useState(null); // 'admin' | 'collector'
     const [loading, setLoading] = useState(true);
 
     const detectRole = (email) => {
         if (!email) return null;
-        if (email === SUPER_ADMIN_EMAIL) return 'superadmin';
-        if (email.endsWith(COLLECTOR_EMAIL_SUFFIX)) return 'collector';
-        if (email.endsWith(DISTRIBUTOR_EMAIL_SUFFIX)) return 'distributor';
-        return 'employee';
+        if (email.includes('admin')) return 'admin';
+        if (email.includes('collector')) return 'collector';
+        return 'admin'; // fallback
     };
 
     useEffect(() => {

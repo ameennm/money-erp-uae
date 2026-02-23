@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import TransactionsPage from './pages/TransactionsPage';
 import AgentsPage from './pages/AgentsPage';
-import EmployeesPage from './pages/EmployeesPage';
+import DistributorsPage from './pages/DistributorsPage';
 import ExpensesPage from './pages/ExpensesPage';
 import ConversionAgentsPage from './pages/ConversionAgentsPage';
 import CreditsPage from './pages/CreditsPage';
@@ -41,24 +41,23 @@ export default function App() {
             <ProtectedRoute><TransactionsPage /></ProtectedRoute>
           } />
 
-          {/* Collector + Super Admin */}
+          {/* Collector + Admin */}
           <Route path="/conversion-agents" element={
-            <ProtectedRoute roles={['superadmin', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
           } />
           <Route path="/credits" element={
-            <ProtectedRoute roles={['superadmin', 'collector']}><CreditsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><CreditsPage /></ProtectedRoute>
           } />
 
-          {/* Super admin + Collector — agent/employee management */}
+          {/* Admin + Collector — agent/employee management */}
           <Route path="/agents" element={
-            <ProtectedRoute roles={['superadmin', 'collector']}><AgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><AgentsPage /></ProtectedRoute>
           } />
-          <Route path="/employees" element={
-            <ProtectedRoute roles={['superadmin', 'collector']}><EmployeesPage /></ProtectedRoute>
+          <Route path="/distributors" element={
+            <ProtectedRoute roles={['admin', 'collector']}><DistributorsPage /></ProtectedRoute>
           } />
-          {/* Super admin only */}
           <Route path="/expenses" element={
-            <ProtectedRoute roles={['superadmin']}><ExpensesPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><ExpensesPage /></ProtectedRoute>
           } />
 
           {/* Fallback */}

@@ -6,39 +6,33 @@ import {
 } from 'lucide-react';
 
 const NAV = {
-    superadmin: [
+    admin: [
         { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
-        { label: 'Credits', path: '/credits', icon: PiggyBank },
         { label: 'Conversion Agents', path: '/conversion-agents', icon: RefreshCw },
-        { label: 'Collection Agents', path: '/agents', icon: Users },
-        { label: 'Employees', path: '/employees', icon: UserCog },
-        { label: 'Expenses', path: '/expenses', icon: TrendingDown },
+        { label: 'Agents', path: '/agents', icon: Users },
+        { label: 'Distributors', path: '/distributors', icon: UserCog },
+        { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
     ],
     collector: [
         { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
-        { label: 'Credits', path: '/credits', icon: PiggyBank },
         { label: 'Conversion Agents', path: '/conversion-agents', icon: RefreshCw },
-        { label: 'Collection Agents', path: '/agents', icon: Users },
-        { label: 'Employees', path: '/employees', icon: UserCog },
-    ],
-    employee: [
-        { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-        { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
+        { label: 'Agents', path: '/agents', icon: Users },
+        { label: 'Distributors', path: '/distributors', icon: UserCog },
+        { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
     ],
 };
 
 const ROLE_COLOR = {
-    superadmin: '#f5a623',
+    admin: '#f5a623',
     collector: '#4a9eff',
-    employee: '#00c896',
 };
 
 export default function Sidebar() {
     const { user, role, logout } = useAuth();
     const navigate = useNavigate();
-    const links = NAV[role] || NAV.employee;
+    const links = NAV[role] || NAV.admin;
 
     const handleLogout = async () => {
         await logout();
@@ -86,7 +80,7 @@ export default function Sidebar() {
                             {user?.name || user?.email?.split('@')[0]}
                         </div>
                         <div className="user-role" style={{ color: ROLE_COLOR[role] }}>
-                            {role === 'superadmin' ? 'Super Admin' : role?.charAt(0).toUpperCase() + role?.slice(1)}
+                            {role?.charAt(0).toUpperCase() + role?.slice(1)}
                         </div>
                     </div>
                     <button id="logout-btn" className="logout-btn" onClick={handleLogout} title="Logout">

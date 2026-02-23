@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { dbService } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, List } from 'lucide-react';
 import { format } from 'date-fns';
 
-const EMPTY = { name: '', phone: '', location: '', notes: '' };
+const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection' };
 
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
@@ -21,7 +21,7 @@ export default function AgentsPage() {
         setLoading(true);
         try {
             const [ar, tr] = await Promise.all([
-                dbService.listAgents(),
+                dbService.listAgents([Query.equal('type', 'collection')]),
                 dbService.listTransactions(),
             ]);
             setAgents(ar.documents);
@@ -38,7 +38,7 @@ export default function AgentsPage() {
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (a) => {
         setEditItem(a);
-        setForm({ name: a.name || '', phone: a.phone || '', location: a.location || '', notes: a.notes || '' });
+        setForm({ name: a.name || '', phone: a.phone || '', location: a.location || '', notes: a.notes || '', currency: a.currency || 'SAR', type: a.type || 'collection' });
         setModal(true);
     };
 
@@ -77,7 +77,7 @@ export default function AgentsPage() {
         }
     };
 
-    const getAgentTxs = (agentId) => txs.filter(t => t.agent_id === agentId);
+    const getAgentTxs = (agentId) => txs.filter(t => t.collection_agent_id === agentId);
 
     return (
         <Layout title="Agents">
@@ -111,6 +111,7 @@ export default function AgentsPage() {
                                     <th>Name</th>
                                     <th>Phone</th>
                                     <th>Location</th>
+                                    <th>Currency</th>
                                     <th>Notes</th>
                                     <th>Actions</th>
                                 </tr>
@@ -151,6 +152,11 @@ export default function AgentsPage() {
                                                 <MapPin size={13} /> {a.location || '—'}
                                             </div>
                                         </td>
+                                        <td>
+                                            <span className={`badge ${a.currency === 'AED' ? 'badge-admin' : 'badge-collector'}`}>
+                                                {a.currency || 'SAR'}
+                                            </span>
+                                        </td>
                                         <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{a.notes || '—'}</td>
                                         <td>
                                             <div className="flex gap-2">
@@ -186,15 +192,15 @@ export default function AgentsPage() {
                         <div className="modal-body">
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
                                 <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total SAR Collected</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Amount Collected</div>
                                     <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                        {getAgentTxs(viewingAgent.$id).reduce((sum, t) => sum + (Number(t.amount_sar) || 0), 0).toLocaleString()} SAR
+                                        {getAgentTxs(viewingAgent.$id).reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()}
                                     </div>
                                 </div>
                                 <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Pending SAR</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Transactions</div>
                                     <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        {getAgentTxs(viewingAgent.$id).filter(t => t.status === 'pending').reduce((sum, t) => sum + (Number(t.amount_sar) || 0), 0).toLocaleString()} SAR
+                                        {getAgentTxs(viewingAgent.$id).length}
                                     </div>
                                 </div>
                             </div>
@@ -206,7 +212,7 @@ export default function AgentsPage() {
                                             <th>Date</th>
                                             <th>ID</th>
                                             <th>Client</th>
-                                            <th>SAR</th>
+                                            <th>Amount</th>
                                             <th>Status</th>
                                         </tr>
                                     </thead>
@@ -219,10 +225,10 @@ export default function AgentsPage() {
                                                     <td style={{ fontSize: '12px' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}</td>
                                                     <td style={{ fontWeight: 700, fontSize: '12px' }}>#{t.tx_id}</td>
                                                     <td>{t.client_name}</td>
-                                                    <td style={{ fontWeight: 600 }}>{Number(t.amount_sar).toLocaleString()}</td>
+                                                    <td style={{ fontWeight: 600 }}>{Number(t.collected_amount).toLocaleString()} {t.collected_currency}</td>
                                                     <td>
-                                                        <span className={`badge badge-${t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'failed' : 'pending'}`}>
-                                                            {t.status}
+                                                        <span className="badge badge-collector">
+                                                            {t.status.replace('_', ' ')}
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -264,6 +270,13 @@ export default function AgentsPage() {
                                         <label className="form-label">Location / Region</label>
                                         <input id="agent-location" className="form-input" placeholder="Riyadh, Jeddah…"
                                             value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Currency</label>
+                                        <select className="form-select" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+                                            <option value="SAR">SAR</option>
+                                            <option value="AED">AED</option>
+                                        </select>
                                     </div>
                                 </div>
                                 <div className="form-group">

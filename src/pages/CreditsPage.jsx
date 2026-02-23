@@ -66,7 +66,7 @@ export default function CreditsPage() {
                 reason: form.reason,
                 amount_sar: parseFloat(form.amount_sar) || 0,
                 date: format(new Date(), 'yyyy-MM-dd'),
-                admin_approved: role === 'superadmin',
+                admin_approved: role === 'admin',
             });
             toast.success('Credit recorded');
             setModal(false);
@@ -192,7 +192,7 @@ export default function CreditsPage() {
                                         </td>
                                         <td>
                                             <div className="flex gap-2">
-                                                {role === 'superadmin' && !c.admin_approved && (
+                                                {role === 'admin' && !c.admin_approved && (
                                                     <button className="btn btn-outline btn-sm" style={{ padding: '4px 8px', fontSize: '11px' }}
                                                         onClick={async () => {
                                                             await dbService.updateCredit(c.$id, { admin_approved: true });

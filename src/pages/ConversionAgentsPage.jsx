@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dbService } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import {
@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-const EMPTY = { name: '', phone: '', notes: '' };
+const EMPTY = { name: '', phone: '', notes: '', type: 'conversion', currency: 'AED' };
 
 export default function ConversionAgentsPage() {
     const [agents, setAgents] = useState([]);
@@ -24,7 +24,7 @@ export default function ConversionAgentsPage() {
         setLoading(true);
         try {
             const [ar, cr] = await Promise.all([
-                dbService.listConversionAgents(),
+                dbService.listAgents([Query.equal('type', 'conversion')]),
                 dbService.listAedConversions(),
             ]);
             setAgents(ar.documents);
@@ -46,14 +46,14 @@ export default function ConversionAgentsPage() {
     };
 
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
-    const openEdit = (a) => { setEditItem(a); setForm({ name: a.name || '', phone: a.phone || '', notes: a.notes || '' }); setModal(true); };
+    const openEdit = (a) => { setEditItem(a); setForm({ name: a.name || '', phone: a.phone || '', notes: a.notes || '', type: 'conversion', currency: 'AED' }); setModal(true); };
 
     const handleSave = async (e) => {
         e.preventDefault();
         setSaving(true);
         try {
-            if (editItem) { await dbService.updateConversionAgent(editItem.$id, form); toast.success('Updated'); }
-            else { await dbService.createConversionAgent(form); toast.success('Conversion agent added'); }
+            if (editItem) { await dbService.updateAgent(editItem.$id, form); toast.success('Updated'); }
+            else { await dbService.createAgent(form); toast.success('Conversion agent added'); }
             setModal(false);
             fetchAll();
         } catch (e) { toast.error(e.message); }
@@ -62,7 +62,7 @@ export default function ConversionAgentsPage() {
 
     const handleDelete = async (id) => {
         if (!window.confirm('Delete this conversion agent?')) return;
-        try { await dbService.deleteConversionAgent(id); toast.success('Deleted'); fetchAll(); }
+        try { await dbService.deleteAgent(id); toast.success('Deleted'); fetchAll(); }
         catch (e) { toast.error(e.message); }
     };
 

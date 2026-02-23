@@ -5,15 +5,13 @@ export default function Topbar({ title }) {
     const { role } = useAuth();
 
     const roleColors = {
-        superadmin: 'badge-superadmin',
+        admin: 'badge-admin',
         collector: 'badge-collector',
-        employee: 'badge-employee',
     };
 
     const roleLabels = {
-        superadmin: 'Super Admin',
+        admin: 'Admin',
         collector: 'Collector',
-        employee: 'Employee',
     };
 
     return (

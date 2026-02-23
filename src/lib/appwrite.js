@@ -10,7 +10,6 @@ export const APPWRITE_CONFIG = {
         agents: 'agents',
         employees: 'employees',
         expenses: 'expenses',
-        conversion_agents: 'conversion_agents',
         credits: 'credits',
         aed_conversions: 'aed_conversions',
     },
@@ -55,11 +54,6 @@ export const dbService = {
     async updateAgent(id, data) { return databases.updateDocument(DB, COL.agents, id, data); },
     async deleteAgent(id) { return databases.deleteDocument(DB, COL.agents, id); },
 
-    // Conversion Agents (SAR→AED)
-    async listConversionAgents(q = []) { return databases.listDocuments(DB, COL.conversion_agents, q); },
-    async createConversionAgent(data) { return databases.createDocument(DB, COL.conversion_agents, ID.unique(), data); },
-    async updateConversionAgent(id, data) { return databases.updateDocument(DB, COL.conversion_agents, id, data); },
-    async deleteConversionAgent(id) { return databases.deleteDocument(DB, COL.conversion_agents, id); },
 
     // Employees
     async listEmployees(q = []) { return databases.listDocuments(DB, COL.employees, q); },

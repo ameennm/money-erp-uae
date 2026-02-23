@@ -402,7 +402,7 @@ input, select, textarea { font-family: inherit; }
   background: rgba(255,84,112,0.15); color: var(--status-failed);
   border: 1px solid rgba(255,84,112,0.3);
 }
-.badge-superadmin {
+.badge-admin {
   background: rgba(245,166,35,0.15); color: var(--brand-gold);
   border: 1px solid rgba(245,166,35,0.3);
 }
