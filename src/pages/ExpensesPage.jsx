@@ -11,7 +11,7 @@ const EXPENSE_CATEGORIES = [
 ];
 const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Other Income'];
 
-const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'INR', date: '', notes: '' };
+const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '' };
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
@@ -36,6 +36,12 @@ export default function ExpensesPage() {
 
     const totalExpense = expenses.filter(e => e.type !== 'income').reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
     const totalIncome = expenses.filter(e => e.type === 'income').reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+    const expenseSAR = expenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseAED = expenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseINR = expenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeSAR = expenses.filter(e => e.type === 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeAED = expenses.filter(e => e.type === 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeINR = expenses.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
     const handleSave = async (ev) => {
         ev.preventDefault();
@@ -75,15 +81,17 @@ export default function ExpensesPage() {
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(255,84,112,0.15)', '--icon-color': 'var(--status-failed)' }}>
                         <TrendingDown size={20} />
                     </div>
-                    <div className="stat-value">₹{totalExpense.toLocaleString('en-IN')}</div>
-                    <div className="stat-label">Total Expenses (INR)</div>
+                    <div className="stat-value">{totalExpense.toLocaleString()}</div>
+                    <div className="stat-label">Total Expenses</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>SAR {expenseSAR.toLocaleString()} | AED {expenseAED.toLocaleString()} | INR {expenseINR.toLocaleString()}</div>
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': 'var(--brand-accent)' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(0,200,150,0.15)', '--icon-color': 'var(--brand-accent)' }}>
                         <TrendingUp size={20} />
                     </div>
-                    <div className="stat-value">₹{totalIncome.toLocaleString('en-IN')}</div>
-                    <div className="stat-label">Total Income (INR)</div>
+                    <div className="stat-value">{totalIncome.toLocaleString()}</div>
+                    <div className="stat-label">Total Income</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>SAR {incomeSAR.toLocaleString()} | AED {incomeAED.toLocaleString()} | INR {incomeINR.toLocaleString()}</div>
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': '#4a9eff' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(74,158,255,0.15)', '--icon-color': '#4a9eff' }}>
@@ -95,16 +103,18 @@ export default function ExpensesPage() {
             </div>
 
             {/* Toolbar */}
-            <div className="flex items-center justify-between mb-6">
-                <div style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+            <div className="flex items-center justify-between mb-6" style={{ gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500 }}>
                     {expenses.length} record{expenses.length !== 1 ? 's' : ''}
                 </div>
-                <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
-                    <Plus size={16} /> Add Income
-                </button>
-                <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
-                    <Plus size={16} /> Add Expense
-                </button>
+                <div className="flex gap-3">
+                    <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
+                        <Plus size={16} /> Add Income
+                    </button>
+                    <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
+                        <Plus size={16} /> Add Expense
+                    </button>
+                </div>
             </div>
 
             {loading ? (
@@ -202,9 +212,9 @@ export default function ExpensesPage() {
                                         <label className="form-label">Currency</label>
                                         <select id="exp-currency" className="form-select"
                                             value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
-                                            <option>INR</option>
                                             <option>AED</option>
                                             <option>SAR</option>
+                                            <option>INR</option>
                                         </select>
                                     </div>
                                 </div>

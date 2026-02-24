@@ -10,6 +10,7 @@ const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: '
 export default function DistributorsPage() {
     const [distributors, setDistributors] = useState([]);
     const [txs, setTxs] = useState([]);
+    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingDist, setViewingDist] = useState(null);
@@ -22,12 +23,14 @@ export default function DistributorsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [dr, tr] = await Promise.all([
+            const [dr, tr, ex] = await Promise.all([
                 dbService.listAgents([Query.equal('type', 'distributor')]),
                 dbService.listTransactions(),
+                dbService.listExpenses(),
             ]);
             setDistributors(dr.documents);
             setTxs(tr.documents);
+            setExpenseRecs(ex.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -40,16 +43,52 @@ export default function DistributorsPage() {
     const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
     const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositModal(true); };
 
+    const safeFloat = (num) => {
+        let n = parseFloat(num);
+        if (isNaN(n)) return 0;
+        return Number.isInteger(n) ? n + 0.00001 : n;
+    };
+
+    // Available INR (not given to distributors)
+    const inrIncome = expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const inrGeneralExp = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const inrDeposited = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const availableINR = inrIncome - inrGeneralExp - inrDeposited;
+
     const handleDeposit = async (e) => {
         e.preventDefault();
         setSaving(true);
         try {
-            const newBal = (Number(editItem.inr_balance) || 0) + Number(depositAmount);
-            await dbService.updateAgent(editItem.$id, { inr_balance: newBal });
-            toast.success('Deposit successful');
+            const amt = Number(depositAmount);
+            if (!amt || amt <= 0) {
+                setSaving(false);
+                return toast.error('Enter a valid deposit amount');
+            }
+            if (amt > availableINR) {
+                setSaving(false);
+                return toast.error(
+                    `Insufficient INR! Only ₹${availableINR.toLocaleString('en-IN')} available. Cannot deposit ₹${amt.toLocaleString('en-IN')}.`,
+                    { duration: 5000 }
+                );
+            }
+            const newBal = (Number(editItem.inr_balance) || 0) + amt;
+            await dbService.updateAgent(editItem.$id, { inr_balance: safeFloat(newBal) });
+
+            // Track as INR expense (deducts from undistributed pool)
+            await dbService.createExpense({
+                title: `Deposit to ${editItem.name}`,
+                type: 'expense',
+                category: 'Distributor Deposit',
+                amount: safeFloat(amt),
+                currency: 'INR',
+                date: new Date().toISOString().split('T')[0],
+                notes: `Deposited ₹${amt.toLocaleString('en-IN')} to ${editItem.name}`
+            });
+
+            toast.success(`₹${amt.toLocaleString('en-IN')} deposited to ${editItem.name}`);
             setDepositModal(false);
             fetchAll();
-        } catch (e) { toast.error(e.message); }
+        } catch (e) { toast.error('Deposit failed: ' + e.message); }
         finally { setSaving(false); }
     };
 
@@ -57,11 +96,13 @@ export default function DistributorsPage() {
         e.preventDefault();
         setSaving(true);
         try {
+            const payload = { ...form };
+            payload.inr_balance = safeFloat(payload.inr_balance);
             if (editItem) {
-                await dbService.updateAgent(editItem.$id, form);
+                await dbService.updateAgent(editItem.$id, payload);
                 toast.success('Distributor Updated');
             } else {
-                await dbService.createAgent(form);
+                await dbService.createAgent(payload);
                 toast.success('Distributor Created');
             }
             setModal(false);
@@ -303,17 +344,34 @@ export default function DistributorsPage() {
                         <form onSubmit={handleDeposit}>
                             <div className="modal-body">
                                 <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
-                                    <p>Current Balance: <strong>₹{Number(editItem.inr_balance || 0).toLocaleString('en-IN')}</strong></p>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Available INR (Not Given):</span>
+                                        <span style={{ fontWeight: 800, color: availableINR > 0 ? '#a78bfa' : 'var(--status-failed)' }}>
+                                            ₹{availableINR.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Current Balance ({editItem.name}):</span>
+                                        <span style={{ fontWeight: 700, color: 'var(--brand-accent)' }}>
+                                            ₹{Number(editItem.inr_balance || 0).toLocaleString('en-IN')}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Deposit Amount (INR)</label>
                                     <input className="form-input" type="number" required placeholder="e.g. 50000"
+                                        max={availableINR}
                                         value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+                                    {depositAmount && Number(depositAmount) > availableINR && (
+                                        <div style={{ color: 'var(--status-failed)', fontSize: 12, marginTop: 6 }}>
+                                            ⚠ Amount exceeds available INR (₹{availableINR.toLocaleString('en-IN')})
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setDepositModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving}>Confirm Deposit</button>
+                                <button type="submit" className="btn btn-accent" disabled={saving || availableINR <= 0}>Confirm Deposit</button>
                             </div>
                         </form>
                     </div>

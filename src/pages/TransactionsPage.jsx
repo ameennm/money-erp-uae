@@ -6,9 +6,10 @@ import toast from 'react-hot-toast';
 import {
     Plus, X, Pencil, Trash2, Search,
     ArrowLeftRight, Copy, CheckCircle,
-    SendHorizonal, Banknote, PackageCheck
+    SendHorizonal, Banknote, PackageCheck, Download
 } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const START_TX_NUM = 20261;
 const genTxId = (existingTxs) => {
@@ -32,16 +33,24 @@ const statusBadge = (s) => {
     return <span className={`badge ${cfg.badge}`}>{cfg.label}</span>;
 };
 
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time'];
+const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
 
-const applyDateRange = (txs, range) => {
+const applyDateRange = (txs, range, from, to) => {
     if (range === 'All Time') return txs;
     const now = new Date();
-    let from;
-    if (range === 'Today') from = startOfDay(now);
-    if (range === 'This Week') from = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') from = startOfMonth(now);
-    return txs.filter(tx => isAfter(new Date(tx.$createdAt), from));
+    let start;
+    if (range === 'Today') start = startOfDay(now);
+    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
+    if (range === 'This Month') start = startOfMonth(now);
+    if (range === 'Custom') {
+        return txs.filter(r => {
+            const d = new Date(r.$createdAt);
+            const f = from ? new Date(from) : null;
+            const t = to ? new Date(to + 'T23:59:59') : null;
+            return (!f || d >= f) && (!t || d <= t);
+        });
+    }
+    return txs.filter(tx => isAfter(new Date(tx.$createdAt), start));
 };
 
 const sum = (arr, f) => arr.reduce((a, t) => a + (Number(t[f]) || 0), 0);
@@ -76,6 +85,8 @@ export default function TransactionsPage() {
     const [agents, setAgents] = useState([]);
     const [filter, setFilter] = useState('');
     const [dateRange, setDateRange] = useState('All Time');
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [editTx, setEditTx] = useState(null);
@@ -116,22 +127,28 @@ export default function TransactionsPage() {
         return (aedValue - aedCostOfInr).toFixed(2);
     };
 
+    const safeFloat = (num) => {
+        let n = parseFloat(num);
+        if (isNaN(n)) return 0;
+        return Number.isInteger(n) ? n + 0.00001 : n;
+    };
+
     const handleSave = async (e) => {
         e.preventDefault();
         setSaving(true);
         try {
             const payload = { ...form };
             // Ensure numbers
-            payload.inr_requested = parseFloat(form.inr_requested) || 0;
-            payload.collected_amount = parseFloat(form.collected_amount) || 0;
+            payload.inr_requested = safeFloat(form.inr_requested);
+            payload.collected_amount = safeFloat(form.collected_amount);
 
-            // Clean optional floats to prevent Appwrite "invalid float format" for empty strings
+            // Clean optional floats
             const optionalFloats = ['collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed'];
             optionalFloats.forEach(f => {
-                if (payload[f] === '') {
+                if (payload[f] === '' || payload[f] === undefined) {
                     delete payload[f];
-                } else {
-                    payload[f] = parseFloat(payload[f]);
+                } else if (!isNaN(parseFloat(payload[f]))) {
+                    payload[f] = safeFloat(payload[f]);
                 }
             });
 
@@ -143,19 +160,30 @@ export default function TransactionsPage() {
                     setSaving(false);
                     return toast.error('Please select a Distributor');
                 }
+
                 payload.tx_id = genTxId(txs);
                 payload.creator_id = user.$id;
                 payload.creator_name = user.name;
-                payload.status = payload.collected_currency === 'SAR' ? 'pending_conversion' : 'pending_distribution';
+                payload.status = 'completed';
+                payload.actual_inr_distributed = safeFloat(payload.inr_requested);
 
+                // Check distributor balance before deducting
                 const dist = agents.find(a => a.$id === payload.distributor_id);
                 if (dist) {
-                    const newBal = (Number(dist.inr_balance) || 0) - payload.inr_requested;
-                    await dbService.updateAgent(dist.$id, { inr_balance: parseFloat(newBal.toFixed(2)) });
+                    const currentBal = Number(dist.inr_balance) || 0;
+                    if (payload.inr_requested > currentBal) {
+                        setSaving(false);
+                        return toast.error(
+                            `Insufficient balance! ${dist.name} has ₹${currentBal.toLocaleString('en-IN')} but ₹${payload.inr_requested.toLocaleString('en-IN')} is needed. Deposit ₹${(payload.inr_requested - currentBal).toLocaleString('en-IN')} more.`,
+                            { duration: 5000 }
+                        );
+                    }
+                    const newBal = currentBal - payload.inr_requested;
+                    await dbService.updateAgent(dist.$id, { inr_balance: safeFloat(newBal) });
                 }
 
                 await dbService.createTransaction(payload);
-                toast.success('Transaction Created');
+                toast.success('Transaction Logged');
             }
             setModal(false);
             fetchAll();
@@ -248,13 +276,58 @@ export default function TransactionsPage() {
         setDistributeModal(true);
     };
 
-    const filtered = applyDateRange(txs, dateRange).filter(tx =>
-        tx.status !== 'completed' &&
-        (
-            tx.client_name?.toLowerCase().includes(filter.toLowerCase()) ||
-            tx.tx_id?.includes(filter)
-        )
+    const handleDelete = async (tx) => {
+        if (!confirm(`Delete transaction #${tx.tx_id} for ${tx.client_name}? This cannot be undone.`)) return;
+        try {
+            // Reverse distributor balance if transaction was completed
+            if (tx.status === 'completed' && tx.distributor_id && tx.inr_requested) {
+                const dist = agents.find(a => a.$id === tx.distributor_id);
+                if (dist) {
+                    const restored = (Number(dist.inr_balance) || 0) + Number(tx.inr_requested);
+                    await dbService.updateAgent(dist.$id, { inr_balance: safeFloat(restored) });
+                }
+            }
+            await dbService.deleteTransaction(tx.$id);
+            toast.success(`Transaction #${tx.tx_id} deleted`);
+            fetchAll();
+        } catch (e) {
+            toast.error('Delete failed: ' + e.message);
+        }
+    };
+
+    const filtered = applyDateRange(txs, dateRange, customFrom, customTo).filter(tx =>
+        tx.client_name?.toLowerCase().includes(filter.toLowerCase()) ||
+        tx.tx_id?.includes(filter)
     );
+
+    const exportToExcel = () => {
+        if (filtered.length === 0) return toast.error('No transactions to export');
+        const rows = filtered.map(tx => ({
+            'TX ID': tx.tx_id || '',
+            'Date': tx.$createdAt ? format(new Date(tx.$createdAt), 'dd-MM-yyyy HH:mm') : '',
+            'Client Name': tx.client_name || '',
+            'INR Requested': tx.inr_requested || 0,
+            'Collected Currency': tx.collected_currency || '',
+            'Collection Rate': tx.collection_rate || '',
+            'Amount Collected': tx.collected_amount || 0,
+            'Collection Agent': tx.collection_agent_name || '',
+            'Distributor': tx.distributor_name || '',
+            'INR Distributed': tx.actual_inr_distributed || 0,
+            'Status': tx.status || '',
+            'Notes': tx.notes || '',
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        // Auto-size columns
+        const colWidths = Object.keys(rows[0]).map(key => ({
+            wch: Math.max(key.length, ...rows.map(r => String(r[key]).length)) + 2
+        }));
+        ws['!cols'] = colWidths;
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+        const fileName = `Transactions_${dateRange.replace(/\s/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        toast.success(`Downloaded ${filtered.length} transactions`);
+    };
 
     return (
         <Layout title="Transactions">
@@ -264,6 +337,15 @@ export default function TransactionsPage() {
                         <button key={r} onClick={() => setDateRange(r)}
                             className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
                     ))}
+                    {dateRange === 'Custom' && (
+                        <>
+                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
+                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                            <span style={{ color: 'var(--text-muted)' }}>to</span>
+                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
+                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                        </>
+                    )}
                 </div>
                 <div className="flex gap-3 flex-1 min-w-[300px]">
                     <div style={{ position: 'relative', flex: 1 }}>
@@ -271,6 +353,11 @@ export default function TransactionsPage() {
                         <input className="form-input" style={{ paddingLeft: 38 }} placeholder="Search client or ID..."
                             value={filter} onChange={e => setFilter(e.target.value)} />
                     </div>
+                    {isAdmin && (
+                        <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
+                            <Download size={16} /> Excel
+                        </button>
+                    )}
                     {isCollector && (
                         <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
                             <Plus size={16} /> New Transaction
@@ -290,7 +377,6 @@ export default function TransactionsPage() {
                                 <th>Collected</th>
                                 <th>Agent</th>
                                 <th>Status</th>
-                                <th>Profit (AED)</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -305,17 +391,14 @@ export default function TransactionsPage() {
                                     </td>
                                     <td>{tx.collection_agent_name || '—'}</td>
                                     <td>{statusBadge(tx.status)}</td>
-                                    <td className="font-bold text-accent">
-                                        {tx.status === 'completed' ? `${tx.profit_aed?.toFixed(2)} AED` : '—'}
-                                    </td>
                                     <td>
                                         <div className="flex gap-2">
-                                            {tx.status === 'pending_distribution' && isCollector && (
-                                                <button className="btn btn-accent btn-sm" onClick={() => openDistribute(tx)}>Distribute</button>
-                                            )}
                                             {isAdmin && (
-                                                <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)}><Pencil size={14} /></button>
+                                                <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
                                             )}
+                                            <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
+                                                <Trash2 size={14} />
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -370,21 +453,6 @@ export default function TransactionsPage() {
                                 </div>
                                 <div className="form-row">
                                     <div className="form-group">
-                                        <label className="form-label">Distributor (Auto-Deducts)</label>
-                                        <select className="form-select" required value={form.distributor_id}
-                                            onChange={e => {
-                                                const a = agents.find(x => x.$id === e.target.value);
-                                                setForm({
-                                                    ...form,
-                                                    distributor_id: e.target.value,
-                                                    distributor_name: a?.name || ''
-                                                });
-                                            }}>
-                                            <option value="">Select Distributor</option>
-                                            {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{a.inr_balance || 0})</option>)}
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
                                         <label className="form-label">Collect In</label>
                                         <select className="form-select" value={form.collected_currency}
                                             onChange={e => setForm({ ...form, collected_currency: e.target.value })}>
@@ -407,6 +475,23 @@ export default function TransactionsPage() {
                                         <label className="form-label">Amount Collected ({form.collected_currency})</label>
                                         <input className="form-input" type="number" step="0.01" required value={form.collected_amount}
                                             readOnly style={{ backgroundColor: 'var(--bg-main)', opacity: 0.8 }} />
+                                    </div>
+                                </div>
+                                <div className="form-row">
+                                    <div className="form-group">
+                                        <label className="form-label">Distributor (Auto-Deducts)</label>
+                                        <select className="form-select" required value={form.distributor_id}
+                                            onChange={e => {
+                                                const a = agents.find(x => x.$id === e.target.value);
+                                                setForm({
+                                                    ...form,
+                                                    distributor_id: e.target.value,
+                                                    distributor_name: a?.name || ''
+                                                });
+                                            }}>
+                                            <option value="">Select Distributor</option>
+                                            {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{a.inr_balance || 0})</option>)}
+                                        </select>
                                     </div>
                                 </div>
                                 <div className="form-group">

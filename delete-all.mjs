@@ -7,34 +7,27 @@ const client = new Client()
 
 const databases = new Databases(client);
 const DB_ID = 'money_erp_db';
-const COL = 'transactions';
-const CONV_COL = 'aed_conversions';
+
+const COLLECTIONS = ['transactions', 'aed_conversions', 'expenses'];
 
 async function deleteAll() {
     try {
-        let hasMore = true;
-        while (hasMore) {
-            const res = await databases.listDocuments(DB_ID, COL);
-            if (res.documents.length === 0) break;
-            for (let doc of res.documents) {
-                await databases.deleteDocument(DB_ID, COL, doc.$id);
-                console.log(`Deleted TX ${doc.$id}`);
+        for (const col of COLLECTIONS) {
+            let count = 0;
+            while (true) {
+                const res = await databases.listDocuments(DB_ID, col);
+                if (res.documents.length === 0) break;
+                for (let doc of res.documents) {
+                    await databases.deleteDocument(DB_ID, col, doc.$id);
+                    count++;
+                }
             }
+            console.log(`✅ Deleted ${count} records from ${col}`);
         }
-        console.log('✅ Deleted all transactions');
-
-        hasMore = true;
-        while (hasMore) {
-            const res = await databases.listDocuments(DB_ID, CONV_COL);
-            if (res.documents.length === 0) break;
-            for (let doc of res.documents) {
-                await databases.deleteDocument(DB_ID, CONV_COL, doc.$id);
-                console.log(`Deleted CONV ${doc.$id}`);
-            }
-        }
-        console.log('✅ Deleted all conversions');
+        console.log('🧹 All data wiped clean!');
     } catch (e) {
         console.error('❌ Failed:', e.message);
     }
 }
 deleteAll();
+

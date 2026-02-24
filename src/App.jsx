@@ -10,6 +10,7 @@ import DistributorsPage from './pages/DistributorsPage';
 import ExpensesPage from './pages/ExpensesPage';
 import ConversionAgentsPage from './pages/ConversionAgentsPage';
 import CreditsPage from './pages/CreditsPage';
+import ReportsPage from './pages/ReportsPage';
 
 export default function App() {
   return (
@@ -58,6 +59,9 @@ export default function App() {
           } />
           <Route path="/expenses" element={
             <ProtectedRoute roles={['admin', 'collector']}><ExpensesPage /></ProtectedRoute>
+          } />
+          <Route path="/reports" element={
+            <ProtectedRoute roles={['admin', 'collector']}><ReportsPage /></ProtectedRoute>
           } />
 
           {/* Fallback */}

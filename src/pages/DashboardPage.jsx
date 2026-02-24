@@ -13,15 +13,23 @@ import toast from 'react-hot-toast';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sumF = (arr, f) => arr.reduce((a, d) => a + (Number(d[f]) || 0), 0);
 
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time'];
+const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
 
-const filterByRange = (arr, range) => {
+const filterByRange = (arr, range, from, to) => {
     if (range === 'All Time') return arr;
     const now = new Date();
-    const start =
-        range === 'Today' ? startOfDay(now) :
-            range === 'This Week' ? startOfWeek(now, { weekStartsOn: 1 }) :
-                startOfMonth(now);
+    let start;
+    if (range === 'Today') start = startOfDay(now);
+    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
+    if (range === 'This Month') start = startOfMonth(now);
+    if (range === 'Custom') {
+        return arr.filter(r => {
+            const d = new Date(r.$createdAt);
+            const f = from ? new Date(from) : null;
+            const t = to ? new Date(to + 'T23:59:59') : null;
+            return (!f || d >= f) && (!t || d <= t);
+        });
+    }
     return arr.filter(r => isAfter(new Date(r.$createdAt), start));
 };
 
@@ -45,9 +53,12 @@ export default function DashboardPage() {
 
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
+    const [convRecs, setConvRecs] = useState([]);
+    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const [convertModal, setConvertModal] = useState(false);
+    const [inrConvertModal, setInrConvertModal] = useState(false);
     const [saving, setSaving] = useState(false);
     const [convertForm, setConvertForm] = useState({
         sar_to_convert: '',
@@ -55,118 +66,60 @@ export default function DashboardPage() {
         conversion_agent_id: '',
         conversion_agent_name: ''
     });
+    const [inrForm, setInrForm] = useState({ aed_amount: '', aed_to_inr_rate: '' });
 
     // Date range
     const [dateRange, setDateRange] = useState('All Time');
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
 
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ag] = await Promise.all([
+            const [t, ag, cr, ex] = await Promise.all([
                 dbService.listTransactions(),
                 dbService.listAgents(),
+                dbService.listAedConversions(),
+                dbService.listExpenses(),
             ]);
             setTxs(t.documents);
             setAgents(ag.documents);
+            setConvRecs(cr.documents);
+            setExpenseRecs(ex.documents);
         } catch (e) { console.error(e); toast.error('Error loading dashboard'); }
         finally { setLoading(false); }
     };
     useEffect(() => { fetchAll(); }, []);
 
+    const safeFloat = (num) => {
+        let n = parseFloat(num);
+        if (isNaN(n)) return 0;
+        return Number.isInteger(n) ? n + 0.00001 : n;
+    };
+
     const handleBulkConvert = async (e) => {
         e.preventDefault();
         if (!convertForm.conversion_agent_id) return toast.error('Select a conversion agent');
 
-        let targetAmount = parseFloat(convertForm.sar_to_convert);
-        if (isNaN(targetAmount) || targetAmount <= 0) return toast.error('Enter a valid amount to convert');
+        const targetAmount = parseFloat(convertForm.sar_to_convert);
+        if (isNaN(targetAmount) || targetAmount <= 0) return toast.error('Enter a valid SAR amount');
+
+        const rate = parseFloat(convertForm.sar_to_aed_rate);
+        if (isNaN(rate) || rate <= 0) return toast.error('Enter a valid SAR→AED rate');
 
         setSaving(true);
         try {
-            const rate = parseFloat(convertForm.sar_to_aed_rate);
-            const toConvert = txs.filter(t => t.status === 'pending_conversion').sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+            const aedAmount = targetAmount * rate;
 
-            const totalPendingSAR = sumF(toConvert, 'collected_amount');
-            if (targetAmount > totalPendingSAR) {
-                targetAmount = totalPendingSAR;
-            }
-
-            let remainingToConvert = targetAmount;
-
-            for (let tx of toConvert) {
-                if (remainingToConvert <= 0) break;
-
-                const txAmount = Number(tx.collected_amount) || 0;
-
-                if (txAmount <= remainingToConvert) {
-                    // Full conversion
-                    const actualAed = txAmount * rate;
-                    await dbService.updateTransaction(tx.$id, {
-                        sar_to_aed_rate: rate,
-                        actual_aed: parseFloat(actualAed.toFixed(2)),
-                        status: 'pending_distribution',
-                        conversion_agent_id: convertForm.conversion_agent_id,
-                        conversion_agent_name: convertForm.conversion_agent_name
-                    });
-                    remainingToConvert -= txAmount;
-                } else {
-                    // Partial conversion (split transaction)
-                    const convertedTxAed = remainingToConvert * rate;
-                    const convertedTxInrRequested = (tx.inr_requested || 0) * (remainingToConvert / txAmount);
-
-                    // 1. Create split completely converted transaction
-                    const payload = {
-                        client_name: tx.client_name,
-                        inr_requested: parseFloat(convertedTxInrRequested.toFixed(2)),
-                        collected_currency: tx.collected_currency,
-                        collected_amount: parseFloat(remainingToConvert.toFixed(2)),
-                        collection_rate: parseFloat(tx.collection_rate || 0),
-                        sar_to_aed_rate: rate,
-                        actual_aed: parseFloat(convertedTxAed.toFixed(2)),
-                        status: 'pending_distribution',
-                        creator_id: tx.creator_id,
-                        creator_name: tx.creator_name,
-                        collection_agent_id: tx.collection_agent_id,
-                        collection_agent_name: tx.collection_agent_name,
-                        conversion_agent_id: convertForm.conversion_agent_id,
-                        conversion_agent_name: convertForm.conversion_agent_name,
-                        distributor_id: tx.distributor_id,
-                        distributor_name: tx.distributor_name,
-                        tx_id: tx.tx_id + '-C', // Splitting suffix
-                        notes: tx.notes ? `${tx.notes} (Split from orig tx)` : '(Split from orig tx)'
-                    };
-
-                    // Clean payload optional floats
-                    ['collection_rate', 'sar_to_aed_rate', 'actual_aed', 'distributor_id', 'distributor_name'].forEach(f => {
-                        if (payload[f] === 0 || !payload[f]) delete payload[f];
-                    });
-
-                    await dbService.createTransaction(payload);
-
-                    // 2. Reduce the original transaction
-                    const newPendingAmount = txAmount - remainingToConvert;
-                    const newPendingInr = (tx.inr_requested || 0) - convertedTxInrRequested;
-
-                    await dbService.updateTransaction(tx.$id, {
-                        collected_amount: parseFloat(newPendingAmount.toFixed(2)),
-                        inr_requested: parseFloat(newPendingInr.toFixed(2))
-                    });
-
-                    remainingToConvert = 0;
-                }
-            }
-
-            // Record the summary of this bulk conversion for the Conversion Agents page
-            const totalAedGenerated = parseFloat((targetAmount * rate).toFixed(2));
             await dbService.createAedConversion({
-                sar_amount: targetAmount,
-                aed_amount: totalAedGenerated,
-                rate: rate,
+                sar_amount: safeFloat(targetAmount),
+                aed_amount: safeFloat(aedAmount),
                 conversion_agent_id: convertForm.conversion_agent_id,
                 conversion_agent_name: convertForm.conversion_agent_name,
-                notes: 'Bulk Dashboard Conversion'
+                date: new Date().toISOString().split('T')[0]
             });
 
-            toast.success(`Successfully converted ${targetAmount} SAR`);
+            toast.success(`Converted ${targetAmount} SAR → ${aedAmount.toFixed(2)} AED`);
             setConvertModal(false);
             setConvertForm({ sar_to_convert: '', sar_to_aed_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
             fetchAll();
@@ -177,32 +130,82 @@ export default function DashboardPage() {
         }
     };
 
+    const handleAedToInrConvert = async (e) => {
+        e.preventDefault();
+        const aedAmt = parseFloat(inrForm.aed_amount);
+        if (isNaN(aedAmt) || aedAmt <= 0) return toast.error('Enter a valid AED amount');
+        const rate = parseFloat(inrForm.aed_to_inr_rate);
+        if (isNaN(rate) || rate <= 0) return toast.error('Enter a valid AED→INR rate');
+
+        setSaving(true);
+        try {
+            const inrAmount = aedAmt * rate;
+
+            // Create AED expense (money leaving AED pool)
+            await dbService.createExpense({
+                title: 'AED→INR Conversion',
+                type: 'expense',
+                category: 'AED→INR Conversion',
+                amount: safeFloat(aedAmt),
+                currency: 'AED',
+                date: new Date().toISOString().split('T')[0],
+                notes: `Converted ${aedAmt} AED at rate ${rate}`
+            });
+
+            // Create INR income (money entering INR undistributed pool)
+            await dbService.createExpense({
+                title: 'AED→INR Conversion',
+                type: 'income',
+                category: 'AED→INR Conversion',
+                amount: safeFloat(inrAmount),
+                currency: 'INR',
+                date: new Date().toISOString().split('T')[0],
+                notes: `Received ₹${inrAmount.toLocaleString('en-IN')} from ${aedAmt} AED at rate ${rate}`
+            });
+
+            toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')}`);
+            setInrConvertModal(false);
+            setInrForm({ aed_amount: '', aed_to_inr_rate: '' });
+            fetchAll();
+        } catch (error) {
+            toast.error('Conversion failed: ' + error.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     // ── Filtered data ──────────────────────────────────────────────────────────
     const fTxs = useMemo(() => filterByRange(txs, dateRange), [txs, dateRange]);
 
     // ── Aggregates ────────────────────────────────────────────────────────────
-    const pendingCollection = fTxs.filter(t => t.status === 'pending_collection');
-    const pendingConversion = fTxs.filter(t => t.status === 'pending_conversion');
-    const pendingDistribution = fTxs.filter(t => t.status === 'pending_distribution');
     const completed = fTxs.filter(t => t.status === 'completed');
 
-    // Balance SAR
-    const totalSARCollected = sumF(fTxs.filter(t => t.collected_currency === 'SAR' && t.status !== 'pending_collection'), 'collected_amount');
-    const totalSARConverted = sumF(fTxs.filter(t => t.collected_currency === 'SAR' && ['pending_distribution', 'completed'].includes(t.status)), 'collected_amount');
-    const balanceSAR = totalSARCollected - totalSARConverted;
+    // Income & Expenses by currency
+    const incByCur = (cur) => expenseRecs.filter(e => e.type === 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expByCur = (cur) => expenseRecs.filter(e => e.type !== 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
-    // Balance AED
-    const totalAEDGenerated = sumF(fTxs.filter(t => ['pending_distribution', 'completed'].includes(t.status)), 'actual_aed') +
-        sumF(fTxs.filter(t => t.collected_currency === 'AED' && t.status !== 'pending_collection' && !t.actual_aed), 'collected_amount');
-    const totalAEDDistributed = sumF(completed, 'actual_aed') +
-        sumF(completed.filter(t => t.collected_currency === 'AED' && !t.actual_aed), 'collected_amount');
-    const balanceAED = totalAEDGenerated - totalAEDDistributed;
+    // SAR Balance = SAR collected - SAR converted + SAR income - SAR expenses
+    const totalSARCollected = sumF(fTxs.filter(t => t.collected_currency === 'SAR'), 'collected_amount');
+    const totalSARConverted = sumF(convRecs, 'sar_amount');
+    const balanceSAR = totalSARCollected - totalSARConverted + incByCur('SAR') - expByCur('SAR');
 
-    // Balance INR (Sum of distributor balances)
-    const balanceINR = sumF(agents.filter(a => a.type === 'distributor'), 'inr_balance');
+    // AED Balance = AED collected + AED from SAR conversions + AED income - AED expenses
+    const totalAEDCollected = sumF(fTxs.filter(t => t.collected_currency === 'AED'), 'collected_amount');
+    const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
+    const balanceAED = totalAEDCollected + totalAEDFromConversions + incByCur('AED') - expByCur('AED');
 
-    // Total Profit (AED)
-    const totalProfitAED = sumF(completed, 'profit_aed');
+    // INR Balance = total INR received (from conversions + income) minus general INR expenses (NOT distributor deposits)
+    const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const balanceINR = incByCur('INR') - inrGeneralExpenses;
+
+    // INR deposited to distributors
+    const inrDepositedToDistributors = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+
+    // INR Not Given to Distributor = INR Balance - what's already deposited to distributors
+    const inrNotGiven = balanceINR - inrDepositedToDistributors;
+
+    // INR Distributed = total INR sent to clients from completed transactions
+    const totalINRDistributed = sumF(completed, 'actual_inr_distributed');
 
     const recentTxs = fTxs.slice(0, 8);
 
@@ -229,51 +232,96 @@ export default function DashboardPage() {
                             border: `1px solid ${dateRange === r ? 'var(--brand-accent)' : 'var(--border-color)'}`,
                         }}>{r}</button>
                 ))}
+                {dateRange === 'Custom' && (
+                    <>
+                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
+                            value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                        <span style={{ color: 'var(--text-muted)' }}>to</span>
+                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
+                            value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                    </>
+                )}
             </div>
 
             {/* ── Financial Summary ────────────────────────── */}
             {(isAdmin) && (
                 <>
-                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)', marginBottom: 12 }}>
-                        Financial Summary — {dateRange}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)' }}>
+                            Financial Summary — {dateRange}
+                        </div>
+                        <div className="flex gap-2">
+                            <button className="btn btn-accent btn-sm" onClick={() => setConvertModal(true)}>
+                                <ArrowLeftRight size={14} /> SAR → AED
+                            </button>
+                            <button className="btn btn-sm" style={{ background: '#a78bfa', color: '#fff', border: 'none' }} onClick={() => setInrConvertModal(true)}>
+                                <ArrowLeftRight size={14} /> AED → INR
+                            </button>
+                        </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px,1fr))', gap: 16, marginBottom: 28 }}>
-                        {/* Total SAR */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px,1fr))', gap: 14, marginBottom: 28 }}>
+                        {/* Total SAR Balance */}
                         <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.25)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                 <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(74,158,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a9eff', flexShrink: 0 }}>
                                     <TrendingUp size={20} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Available SAR Balance</div>
-                                    <div style={{ fontSize: 26, fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{balanceSAR.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>SAR Balance</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{balanceSAR.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending conversion</div>
                                 </div>
                             </div>
                         </div>
-                        {/* Balance AED */}
+                        {/* AED Balance */}
                         <div className="card" style={{ padding: 20, border: '1px solid rgba(245,166,35,0.25)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                 <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245,166,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-gold)', flexShrink: 0 }}>
                                     <Banknote size={20} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Available AED Balance</div>
-                                    <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{balanceAED.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending distribution</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>AED Balance</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{balanceAED.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>collected + converted</div>
                                 </div>
                             </div>
                         </div>
-                        {/* Balance INR */}
+                        {/* INR Balance */}
                         <div className="card" style={{ padding: 20, border: '1px solid rgba(167,139,250,0.25)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                 <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(167,139,250,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a78bfa', flexShrink: 0 }}>
+                                    <Wallet size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>INR Balance</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#a78bfa', lineHeight: 1 }}>₹{balanceINR.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>total INR in system</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* INR Distributed to Clients */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(0,200,150,0.25)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(0,200,150,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-accent)', flexShrink: 0 }}>
                                     <SendHorizonal size={20} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Available INR Balance</div>
-                                    <div style={{ fontSize: 26, fontWeight: 800, color: '#a78bfa', lineHeight: 1 }}>₹{balanceINR.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>with distributors</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>INR Distributed</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-accent)', lineHeight: 1 }}>₹{totalINRDistributed.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{completed.length} transactions to clients</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* INR Not Given to Distributor */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(255,170,50,0.25)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(255,170,50,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffaa32', flexShrink: 0 }}>
+                                    <Banknote size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>INR Not Given to Distributor</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#ffaa32', lineHeight: 1 }}>₹{inrNotGiven.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending deposit to distributors</div>
                                 </div>
                             </div>
                         </div>
@@ -284,28 +332,23 @@ export default function DashboardPage() {
             {/* ── Overview Stats ───────────────────────────────────────────────── */}
             <div className="flex items-center justify-between mb-4">
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)' }}>Operational Overview</div>
-                {isAdmin && pendingConversion.length > 0 && (
-                    <button className="btn btn-accent btn-sm" onClick={() => setConvertModal(true)}>
-                        <ArrowLeftRight size={14} style={{ marginRight: 6 }} /> Bulk Convert {pendingConversion.length} SAR Transactions
-                    </button>
-                )}
             </div>
             <div className="stats-grid">
-                <div className="stat-card" style={{ '--accent-bar': 'var(--status-pending)' }}>
-                    <div className="stat-value">{pendingCollection.length}</div>
-                    <div className="stat-label">Pending Collection</div>
+                <div className="stat-card" style={{ '--accent-bar': '#4a9eff' }}>
+                    <div className="stat-value">{totalSARCollected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    <div className="stat-label">Total SAR Collected</div>
                 </div>
-                <div className="stat-card" style={{ '--accent-bar': 'var(--status-inprogress)' }}>
-                    <div className="stat-value">{pendingConversion.length}</div>
-                    <div className="stat-label">Pending Conversion</div>
-                </div>
-                <div className="stat-card" style={{ '--accent-bar': '#a78bfa' }}>
-                    <div className="stat-value">{pendingDistribution.length}</div>
-                    <div className="stat-label">Pending Distribution</div>
+                <div className="stat-card" style={{ '--accent-bar': 'var(--brand-gold)' }}>
+                    <div className="stat-value">{totalAEDCollected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    <div className="stat-label">Total AED Collected</div>
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': 'var(--status-completed)' }}>
                     <div className="stat-value">{completed.length}</div>
-                    <div className="stat-label">Completed Transactions</div>
+                    <div className="stat-label">Transactions Done</div>
+                </div>
+                <div className="stat-card" style={{ '--accent-bar': 'var(--status-inprogress)' }}>
+                    <div className="stat-value">{fTxs.length}</div>
+                    <div className="stat-label">Total Transactions</div>
                 </div>
 
                 {isAdmin && (
@@ -364,34 +407,31 @@ export default function DashboardPage() {
                 )}
             </div>
 
-            {/* Bulk Convert Modal */}
+            {/* Bulk Convert SAR→AED Modal */}
             {convertModal && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setConvertModal(false)}>
                     <div className="modal">
                         <div className="modal-header">
-                            <h3 className="modal-title">Bulk SAR Conversion</h3>
+                            <h3 className="modal-title">SAR → AED Conversion</h3>
                             <button className="close-btn" onClick={() => setConvertModal(false)}><X size={20} /></button>
                         </div>
                         <form onSubmit={handleBulkConvert}>
                             <div className="modal-body">
                                 <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span>Total Available to Convert:</span>
-                                        <span style={{ fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                            {sumF(pendingConversion, 'collected_amount').toLocaleString()} SAR
+                                        <span>Available SAR Balance:</span>
+                                        <span style={{ fontWeight: 800, color: '#4a9eff' }}>
+                                            {balanceSAR.toLocaleString(undefined, { maximumFractionDigits: 2 })} SAR
                                         </span>
-                                    </div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                                        (From {pendingConversion.length} transaction{pendingConversion.length !== 1 ? 's' : ''})
                                     </div>
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label">Total Amount to Convert (SAR) *</label>
+                                    <label className="form-label">Amount (SAR) *</label>
                                     <input className="form-input" type="number" step="0.01" placeholder="e.g. 50000" required
                                         value={convertForm.sar_to_convert} onChange={e => setConvertForm({ ...convertForm, sar_to_convert: e.target.value })} />
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label">Conversion Rate (SAR to AED) *</label>
+                                    <label className="form-label">Rate (SAR → AED) *</label>
                                     <input className="form-input" type="number" step="0.0001" placeholder="e.g. 0.975" required
                                         value={convertForm.sar_to_aed_rate} onChange={e => setConvertForm({ ...convertForm, sar_to_aed_rate: e.target.value })} />
                                 </div>
@@ -409,11 +449,61 @@ export default function DashboardPage() {
                                         ))}
                                     </select>
                                 </div>
+                                {convertForm.sar_to_convert && convertForm.sar_to_aed_rate && (
+                                    <div className="card" style={{ background: 'var(--bg-main)', padding: 12, marginTop: 8 }}>
+                                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Result: <strong style={{ color: 'var(--brand-gold)' }}>{(parseFloat(convertForm.sar_to_convert) * parseFloat(convertForm.sar_to_aed_rate)).toFixed(2)} AED</strong></div>
+                                    </div>
+                                )}
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setConvertModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving || pendingConversion.length === 0}>
-                                    {saving ? 'Converting...' : 'Convert Transactions'}
+                                <button type="submit" className="btn btn-accent" disabled={saving}>
+                                    {saving ? 'Converting...' : 'Convert SAR → AED'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* AED→INR Convert Modal */}
+            {inrConvertModal && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setInrConvertModal(false)}>
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3 className="modal-title">AED → INR Conversion</h3>
+                            <button className="close-btn" onClick={() => setInrConvertModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleAedToInrConvert}>
+                            <div className="modal-body">
+                                <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span>Available AED Balance:</span>
+                                        <span style={{ fontWeight: 800, color: 'var(--brand-gold)' }}>
+                                            {balanceAED.toLocaleString(undefined, { maximumFractionDigits: 2 })} AED
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Amount (AED) *</label>
+                                    <input className="form-input" type="number" step="0.01" placeholder="e.g. 5000" required
+                                        value={inrForm.aed_amount} onChange={e => setInrForm({ ...inrForm, aed_amount: e.target.value })} />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Rate (1 AED = ? INR) *</label>
+                                    <input className="form-input" type="number" step="0.01" placeholder="e.g. 22.5" required
+                                        value={inrForm.aed_to_inr_rate} onChange={e => setInrForm({ ...inrForm, aed_to_inr_rate: e.target.value })} />
+                                </div>
+                                {inrForm.aed_amount && inrForm.aed_to_inr_rate && (
+                                    <div className="card" style={{ background: 'var(--bg-main)', padding: 12, marginTop: 8 }}>
+                                        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Result: <strong style={{ color: '#a78bfa' }}>₹{(parseFloat(inrForm.aed_amount) * parseFloat(inrForm.aed_to_inr_rate)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong> INR</div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-outline" onClick={() => setInrConvertModal(false)}>Cancel</button>
+                                <button type="submit" className="btn" style={{ background: '#a78bfa', color: '#fff', border: 'none' }} disabled={saving}>
+                                    {saving ? 'Converting...' : 'Convert AED → INR'}
                                 </button>
                             </div>
                         </form>
