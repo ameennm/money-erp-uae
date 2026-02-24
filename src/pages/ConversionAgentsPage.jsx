@@ -74,7 +74,7 @@ export default function ConversionAgentsPage() {
                 </div>
             </div>
 
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
                 <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
                     {agents.length} agent{agents.length !== 1 ? 's' : ''} · {convRecs.length} total conversions recorded
                 </div>

@@ -127,7 +127,7 @@ export default function DistributorsPage() {
 
     return (
         <Layout title="Distributors">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
                 <div>
                     <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                         {distributors.length} distributor{distributors.length !== 1 ? 's' : ''}

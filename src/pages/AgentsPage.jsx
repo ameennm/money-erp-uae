@@ -81,7 +81,7 @@ export default function AgentsPage() {
 
     return (
         <Layout title="Agents">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
                 <div>
                     <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                         {agents.length} agent{agents.length !== 1 ? 's' : ''} registered

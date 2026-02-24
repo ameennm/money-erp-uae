@@ -155,7 +155,7 @@ export default function CreditsPage() {
             </div>
 
             {/* ── Toolbar ────────────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
                 <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{filteredCredits.length} credit entries</div>
                 <button id="new-credit-btn" className="btn btn-accent" onClick={() => setModal(true)}>
                     <Plus size={16} /> Log Credit
