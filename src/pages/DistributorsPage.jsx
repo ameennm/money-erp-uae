@@ -2,8 +2,28 @@ import { useState, useEffect } from 'react';
 import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Trash2, UserCog, Eye, Pencil, SendHorizonal } from 'lucide-react';
-import { format } from 'date-fns';
+import { Plus, X, Trash2, UserCog, Eye, Pencil, SendHorizonal, Calendar } from 'lucide-react';
+import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+
+const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
+
+const applyDateRange = (arr, range, from, to) => {
+    if (range === 'All Time') return arr;
+    const now = new Date();
+    let start;
+    if (range === 'Today') start = startOfDay(now);
+    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
+    if (range === 'This Month') start = startOfMonth(now);
+    if (range === 'Custom') {
+        return arr.filter(r => {
+            const d = new Date(r.$createdAt || r.date);
+            const f = from ? new Date(from) : null;
+            const t = to ? new Date(to + 'T23:59:59') : null;
+            return (!f || d >= f) && (!t || d <= t);
+        });
+    }
+    return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
+};
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: 'INR' };
 
@@ -14,6 +34,9 @@ export default function DistributorsPage() {
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingDist, setViewingDist] = useState(null);
+    const [dateRange, setDateRange] = useState('All Time');
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [depositModal, setDepositModal] = useState(false);
@@ -223,73 +246,136 @@ export default function DistributorsPage() {
             )}
 
             {/* History Modal */}
-            {viewingDist && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingDist(null)}>
-                    <div className="modal" style={{ maxWidth: '800px' }}>
-                        <div className="modal-header">
-                            <div>
-                                <h3 className="modal-title">Distributor Logs: {viewingDist.name}</h3>
-                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                    Distribution history for this distributor
-                                </div>
-                            </div>
-                            <button className="close-btn" onClick={() => setViewingDist(null)}><X size={20} /></button>
-                        </div>
-                        <div className="modal-body">
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                                <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Distributions</div>
-                                    <div style={{ fontSize: '20px', fontWeight: 800 }}>
-                                        {getDistTxs(viewingDist.$id).length}
-                                    </div>
-                                </div>
-                                <div className="card" style={{ padding: '16px', background: 'rgba(167,139,250,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total INR Distributed</div>
-                                    <div style={{ fontSize: '20px', fontWeight: 800, color: '#a78bfa' }}>
-                                        ₹{getDistTxs(viewingDist.$id).reduce((sum, t) => sum + (Number(t.actual_inr_distributed) || 0), 0).toLocaleString('en-IN')}
-                                    </div>
-                                </div>
-                            </div>
+            {viewingDist && (() => {
+                let distEvents = getDistTxs(viewingDist.$id).map(t => ({
+                    type: 'distribution',
+                    $createdAt: t.$createdAt,
+                    $id: t.$id,
+                    amount: -Number(t.actual_inr_distributed),
+                    ref: '#' + t.tx_id,
+                    details: t.client_name,
+                    status: t.status
+                }));
 
-                            <div className="table-wrapper">
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>TX ID</th>
-                                            <th>Client</th>
-                                            <th>INR Distributed</th>
-                                            <th>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {getDistTxs(viewingDist.$id).length === 0 ? (
-                                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No distributions recorded yet.</td></tr>
-                                        ) : (
-                                            getDistTxs(viewingDist.$id).map(t => (
-                                                <tr key={t.$id}>
-                                                    <td style={{ fontSize: '12px' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}</td>
-                                                    <td style={{ fontWeight: 700, fontSize: '12px' }}>#{t.tx_id}</td>
-                                                    <td>{t.client_name}</td>
-                                                    <td style={{ fontWeight: 600, color: '#a78bfa' }}>₹{Number(t.actual_inr_distributed).toLocaleString('en-IN')}</td>
-                                                    <td>
-                                                        <span className={`badge badge-${t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'failed' : 'pending'}`}>
-                                                            {t.status}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
+                let depEvents = expenseRecs.filter(e => e.category === 'Distributor Deposit' && (e.title?.includes(viewingDist.name) || e.notes?.includes(viewingDist.name))).map(e => ({
+                    type: 'deposit',
+                    $createdAt: e.$createdAt || e.date,
+                    $id: e.$id,
+                    amount: Number(e.amount),
+                    ref: 'DEP',
+                    details: 'Admin Deposit',
+                    status: 'completed'
+                }));
+
+                let combined = [...distEvents, ...depEvents].sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+
+                let runningINR = 0;
+                combined = combined.map(ev => {
+                    runningINR += ev.amount;
+                    return { ...ev, running_balance: runningINR };
+                });
+
+                const filteredEvents = applyDateRange(combined, dateRange, customFrom, customTo);
+
+                const periodDistributions = filteredEvents.filter(e => e.type === 'distribution');
+
+                return (
+                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingDist(null)}>
+                        <div className="modal" style={{ maxWidth: '950px', width: '90%', maxHeight: '90vh' }}>
+                            <div className="modal-header">
+                                <div>
+                                    <h3 className="modal-title">Distributor Ledger: {viewingDist.name}</h3>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        Deposits and completed distributions history
+                                    </div>
+                                </div>
+                                <button className="close-btn" onClick={() => setViewingDist(null)}><X size={20} /></button>
                             </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-outline" onClick={() => setViewingDist(null)}>Close</button>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+                                {/* Filters */}
+                                <div className="flex flex-wrap gap-2">
+                                    {DATE_RANGES.map(r => (
+                                        <button key={r} onClick={() => setDateRange(r)}
+                                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
+                                    ))}
+                                    {dateRange === 'Custom' && (
+                                        <>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                                            <span style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>to</span>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                                        </>
+                                    )}
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Distributions (Count)</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                            {periodDistributions.length}
+                                        </div>
+                                    </div>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(167,139,250,0.05)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period INR Distributed</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#a78bfa' }}>
+                                            ₹{Math.abs(periodDistributions.reduce((sum, t) => sum + t.amount, 0)).toLocaleString('en-IN')}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="table-wrapper" style={{ flex: 1 }}>
+                                    <table className="data-table" style={{ fontSize: 13 }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ width: 40 }}>#</th>
+                                                <th>Date</th>
+                                                <th>Reference/Client</th>
+                                                <th style={{ textAlign: 'center' }}>Event</th>
+                                                <th style={{ textAlign: 'right' }}>Credit (Deposit)</th>
+                                                <th style={{ textAlign: 'right' }}>Debit (Payout)</th>
+                                                <th style={{ textAlign: 'right' }}>Running Bal</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredEvents.length === 0 ? (
+                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
+                                            ) : (
+                                                filteredEvents.map((ev, idx) => (
+                                                    <tr key={ev.$id || idx}>
+                                                        <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                                            <div className="flex items-center gap-1"><Calendar size={12} /> {ev.$createdAt ? format(new Date(ev.$createdAt), 'dd MMM yy HH:mm') : '—'}</div>
+                                                        </td>
+                                                        <td style={{ fontWeight: 500 }}>
+                                                            <span style={{ color: 'var(--brand-accent)', fontSize: 11, marginRight: 6 }}>{ev.ref}</span>
+                                                            <br />{ev.details}
+                                                        </td>
+                                                        <td style={{ textAlign: 'center' }}>
+                                                            <span className={`badge badge-${ev.status === 'completed' ? 'completed' : 'pending'}`} style={{ fontSize: 10 }}>
+                                                                {ev.type}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: ev.amount > 0 ? 800 : 500, color: ev.amount > 0 ? 'var(--brand-accent)' : 'inherit' }}>
+                                                            {ev.amount > 0 ? `+₹${ev.amount.toLocaleString('en-IN')}` : '—'}
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: ev.amount < 0 ? 800 : 500, color: ev.amount < 0 ? 'var(--status-failed)' : 'inherit' }}>
+                                                            {ev.amount < 0 ? `-₹${Math.abs(ev.amount).toLocaleString('en-IN')}` : '—'}
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                                            ₹{Number(ev.running_balance).toLocaleString('en-IN')}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Modal */}
             {modal && (

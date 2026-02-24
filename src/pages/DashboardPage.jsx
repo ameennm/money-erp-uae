@@ -192,7 +192,8 @@ export default function DashboardPage() {
     // AED Balance = AED collected + AED from SAR conversions + AED income - AED expenses
     const totalAEDCollected = sumF(fTxs.filter(t => t.collected_currency === 'AED'), 'collected_amount');
     const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
-    const balanceAED = totalAEDCollected + totalAEDFromConversions + incByCur('AED') - expByCur('AED');
+    const totalAEDConvertedToINR = expenseRecs.filter(e => e.category === 'AED→INR Conversion' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const balanceAED = totalAEDCollected + totalAEDFromConversions + incByCur('AED') - expByCur('AED') - totalAEDConvertedToINR;
 
     // INR Balance = total INR received (from conversions + income) minus general INR expenses (NOT distributor deposits)
     const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);

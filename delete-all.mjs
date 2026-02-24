@@ -1,4 +1,4 @@
-import { Client, Databases } from 'node-appwrite';
+import { Client, Databases, Query } from 'node-appwrite';
 
 const client = new Client()
     .setEndpoint('https://sgp.cloud.appwrite.io/v1')
@@ -24,6 +24,25 @@ async function deleteAll() {
             }
             console.log(`✅ Deleted ${count} records from ${col}`);
         }
+
+        // Reset all agent and distributor balances to 0 instead of deleting them
+        console.log('🔄 Resetting agent/distributor balances...');
+        let agentCount = 0;
+        let agentCursor = null;
+        while (true) {
+            const queries = agentCursor ? [Query.cursorAfter(agentCursor)] : [];
+            const res = await databases.listDocuments(DB_ID, 'agents', queries);
+            if (res.documents.length === 0) break;
+
+            for (let doc of res.documents) {
+                await databases.updateDocument(DB_ID, 'agents', doc.$id, {
+                    inr_balance: 0
+                });
+                agentCount++;
+                agentCursor = doc.$id;
+            }
+        }
+        console.log(`✅ Reset balances for ${agentCount} agents/distributors`);
         console.log('🧹 All data wiped clean!');
     } catch (e) {
         console.error('❌ Failed:', e.message);

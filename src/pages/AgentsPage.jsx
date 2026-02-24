@@ -3,7 +3,27 @@ import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, List } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+
+const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
+
+const applyDateRange = (arr, range, from, to) => {
+    if (range === 'All Time') return arr;
+    const now = new Date();
+    let start;
+    if (range === 'Today') start = startOfDay(now);
+    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
+    if (range === 'This Month') start = startOfMonth(now);
+    if (range === 'Custom') {
+        return arr.filter(r => {
+            const d = new Date(r.$createdAt || r.date);
+            const f = from ? new Date(from) : null;
+            const t = to ? new Date(to + 'T23:59:59') : null;
+            return (!f || d >= f) && (!t || d <= t);
+        });
+    }
+    return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
+};
 
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection' };
 
@@ -13,6 +33,9 @@ export default function AgentsPage() {
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
+    const [dateRange, setDateRange] = useState('All Time');
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
@@ -77,7 +100,21 @@ export default function AgentsPage() {
         }
     };
 
-    const getAgentTxs = (agentId) => txs.filter(t => t.collection_agent_id === agentId);
+    const getAgentTxs = (agentId) => {
+        let agentRecords = txs.filter(t => t.collection_agent_id === agentId);
+        agentRecords.sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+
+        let runningTotal = 0;
+        const mapped = agentRecords.map(t => {
+            runningTotal += Number(t.collected_amount) || 0;
+            return {
+                ...t,
+                running_balance: runningTotal
+            };
+        });
+
+        return mapped;
+    };
 
     return (
         <Layout title="Agents">
@@ -177,73 +214,101 @@ export default function AgentsPage() {
             )}
 
             {/* History Modal */}
-            {viewingAgent && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
-                    <div className="modal" style={{ maxWidth: '800px' }}>
-                        <div className="modal-header">
-                            <div>
-                                <h3 className="modal-title">Transaction History: {viewingAgent.name}</h3>
-                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                    Showing all transactions collected by this agent
-                                </div>
-                            </div>
-                            <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
-                        </div>
-                        <div className="modal-body">
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                                <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Amount Collected</div>
-                                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                        {getAgentTxs(viewingAgent.$id).reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()}
-                                    </div>
-                                </div>
-                                <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Transactions</div>
-                                    <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        {getAgentTxs(viewingAgent.$id).length}
-                                    </div>
-                                </div>
-                            </div>
+            {viewingAgent && (() => {
+                const allTxs = getAgentTxs(viewingAgent.$id);
+                const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
 
-                            <div className="table-wrapper">
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>ID</th>
-                                            <th>Client</th>
-                                            <th>Amount</th>
-                                            <th>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {getAgentTxs(viewingAgent.$id).length === 0 ? (
-                                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No transactions found for this agent.</td></tr>
-                                        ) : (
-                                            getAgentTxs(viewingAgent.$id).map(t => (
-                                                <tr key={t.$id}>
-                                                    <td style={{ fontSize: '12px' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}</td>
-                                                    <td style={{ fontWeight: 700, fontSize: '12px' }}>#{t.tx_id}</td>
-                                                    <td>{t.client_name}</td>
-                                                    <td style={{ fontWeight: 600 }}>{Number(t.collected_amount).toLocaleString()} {t.collected_currency}</td>
-                                                    <td>
-                                                        <span className="badge badge-collector">
-                                                            {t.status.replace('_', ' ')}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
+                return (
+                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
+                        <div className="modal" style={{ maxWidth: '900px', width: '90%', maxHeight: '90vh' }}>
+                            <div className="modal-header">
+                                <div>
+                                    <h3 className="modal-title">Transaction Ledger: {viewingAgent.name}</h3>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        Showing collections assigned to this agent
+                                    </div>
+                                </div>
+                                <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
                             </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-outline" onClick={() => setViewingAgent(null)}>Close</button>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+                                {/* Filters */}
+                                <div className="flex flex-wrap gap-2">
+                                    {DATE_RANGES.map(r => (
+                                        <button key={r} onClick={() => setDateRange(r)}
+                                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
+                                    ))}
+                                    {dateRange === 'Custom' && (
+                                        <>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                                            <span style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>to</span>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                                        </>
+                                    )}
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Collections</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                            {filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}> {viewingAgent.currency || 'SAR'}</span>
+                                        </div>
+                                    </div>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transaction Count</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                            {filteredTxs.length}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="table-wrapper" style={{ flex: 1 }}>
+                                    <table className="data-table" style={{ fontSize: 13 }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ width: 40 }}>#</th>
+                                                <th>Date</th>
+                                                <th>Ref/Client</th>
+                                                <th style={{ textAlign: 'right' }}>Collected</th>
+                                                <th style={{ textAlign: 'right' }}>Running Bal</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredTxs.length === 0 ? (
+                                                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
+                                            ) : (
+                                                filteredTxs.map((t, idx) => (
+                                                    <tr key={t.$id}>
+                                                        <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy HH:mm') : '—'}</td>
+                                                        <td style={{ fontWeight: 500 }}>
+                                                            <span style={{ color: 'var(--brand-accent)', fontSize: 11, marginRight: 6 }}>#{t.tx_id}</span>
+                                                            <br />{t.client_name}
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
+                                                            {Number(t.collected_amount).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                                            {Number(t.running_balance).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
+                                                        </td>
+                                                        <td>
+                                                            <span className="badge badge-collector" style={{ fontSize: 10 }}>
+                                                                {t.status.replace('_', ' ')}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Modal */}
             {modal && (

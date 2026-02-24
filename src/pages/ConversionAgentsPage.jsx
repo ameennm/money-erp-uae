@@ -6,7 +6,27 @@ import {
     Plus, X, Pencil, Trash2, RefreshCw, Phone,
     TrendingUp, Banknote, Wallet, Calendar, List
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+
+const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
+
+const applyDateRange = (arr, range, from, to) => {
+    if (range === 'All Time') return arr;
+    const now = new Date();
+    let start;
+    if (range === 'Today') start = startOfDay(now);
+    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
+    if (range === 'This Month') start = startOfMonth(now);
+    if (range === 'Custom') {
+        return arr.filter(r => {
+            const d = new Date(r.$createdAt || r.date);
+            const f = from ? new Date(from) : null;
+            const t = to ? new Date(to + 'T23:59:59') : null;
+            return (!f || d >= f) && (!t || d <= t);
+        });
+    }
+    return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
+};
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'conversion', currency: 'AED' };
 
@@ -16,6 +36,9 @@ export default function ConversionAgentsPage() {
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
+    const [dateRange, setDateRange] = useState('All Time');
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
@@ -168,58 +191,98 @@ export default function ConversionAgentsPage() {
             )}
 
             {/* History Modal */}
-            {viewingAgent && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
-                    <div className="modal" style={{ maxWidth: '850px' }}>
-                        <div className="modal-header">
-                            <div>
-                                <h3 className="modal-title">Conversion History: {viewingAgent.name}</h3>
-                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                    SAR → AED conversion logs processed by this agent
+            {viewingAgent && (() => {
+                let recs = convRecs.filter(r => r.conversion_agent_id === viewingAgent.$id);
+                // sort chronologically to compute running totals
+                recs.sort((a, b) => new Date(a.$createdAt || a.date) - new Date(b.$createdAt || b.date));
+
+                let runningAED = 0;
+                let runningProfit = 0;
+                let allTxs = recs.map(r => {
+                    runningAED += Number(r.aed_amount) || 0;
+                    runningProfit += Number(r.profit_inr) || 0;
+                    return {
+                        ...r,
+                        running_aed: runningAED,
+                        running_profit: runningProfit
+                    };
+                });
+
+                const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
+
+                return (
+                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
+                        <div className="modal" style={{ maxWidth: '950px', width: '90%', maxHeight: '90vh' }}>
+                            <div className="modal-header">
+                                <div>
+                                    <h3 className="modal-title">Conversion Ledger: {viewingAgent.name}</h3>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        SAR → AED conversions handled by this agent
+                                    </div>
+                                </div>
+                                <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                            </div>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+                                {/* Filters */}
+                                <div className="flex flex-wrap gap-2">
+                                    {DATE_RANGES.map(r => (
+                                        <button key={r} onClick={() => setDateRange(r)}
+                                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
+                                    ))}
+                                    {dateRange === 'Custom' && (
+                                        <>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+                                            <span style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>to</span>
+                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
+                                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="table-wrapper" style={{ flex: 1 }}>
+                                    <table className="data-table" style={{ fontSize: 13 }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ width: 40 }}>#</th>
+                                                <th>Date</th>
+                                                <th style={{ textAlign: 'right' }}>Sent (SAR)</th>
+                                                <th style={{ textAlign: 'center' }}>Rate</th>
+                                                <th style={{ textAlign: 'right' }}>Received (AED)</th>
+                                                <th style={{ textAlign: 'right' }}>AED Balance</th>
+                                                <th style={{ textAlign: 'right' }}>Profit (INR)</th>
+                                                <th>Notes</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredTxs.length === 0 ? (
+                                                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No conversion records found.</td></tr>
+                                            ) : (
+                                                filteredTxs.map((r, idx) => (
+                                                    <tr key={r.$id}>
+                                                        <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                                            <div className="flex items-center gap-1"><Calendar size={12} /> {r.date}</div>
+                                                        </td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{Number(r.sar_amount).toLocaleString()}</td>
+                                                        <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>{r.sar_rate}</td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-gold)' }}>+{Number(r.aed_amount).toLocaleString()}</td>
+                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>{Number(r.running_aed).toLocaleString()}</td>
+                                                        <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
+                                                            {r.profit_inr >= 0 ? '+' : ''}₹{Number(r.profit_inr).toLocaleString('en-IN')}
+                                                        </td>
+                                                        <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                            <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
-                        </div>
-                        <div className="modal-body">
-                            <div className="table-wrapper">
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>SAR Amount</th>
-                                            <th>SAR/AED Rate</th>
-                                            <th>AED Received</th>
-                                            <th>Profit (INR)</th>
-                                            <th>Notes</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {convRecs.filter(r => r.conversion_agent_id === viewingAgent.$id).length === 0 ? (
-                                            <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No conversion records found.</td></tr>
-                                        ) : (
-                                            convRecs.filter(r => r.conversion_agent_id === viewingAgent.$id).map(r => (
-                                                <tr key={r.$id}>
-                                                    <td style={{ fontSize: '12px' }}><div className="flex items-center gap-1"><Calendar size={12} /> {r.date}</div></td>
-                                                    <td style={{ fontWeight: 700 }}>{Number(r.sar_amount).toLocaleString()}</td>
-                                                    <td style={{ color: 'var(--text-secondary)' }}>{r.sar_rate}</td>
-                                                    <td style={{ fontWeight: 700, color: 'var(--brand-gold)' }}>{Number(r.aed_amount).toLocaleString()}</td>
-                                                    <td style={{ color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
-                                                        ₹{Number(r.profit_inr).toLocaleString('en-IN')}
-                                                    </td>
-                                                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{r.notes || '—'}</td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-outline" onClick={() => setViewingAgent(null)}>Close</button>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Modal */}
             {modal && (
