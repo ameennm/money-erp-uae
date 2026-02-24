@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
     LayoutDashboard, ArrowLeftRight, Users, UserCog,
-    TrendingDown, LogOut, Wallet, RefreshCw, PiggyBank, FileSpreadsheet
+    TrendingDown, LogOut, Wallet, RefreshCw, PiggyBank, FileSpreadsheet, X
 } from 'lucide-react';
 
 const NAV = {
@@ -31,7 +31,7 @@ const ROLE_COLOR = {
     collector: '#4a9eff',
 };
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
     const { user, role, logout } = useAuth();
     const navigate = useNavigate();
     const links = NAV[role] || NAV.admin;
@@ -42,8 +42,8 @@ export default function Sidebar() {
     };
 
     return (
-        <aside className="sidebar">
-            {/* ── Brand ────────────────────────────────────────────────────────── */}
+        <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
+            {/* ── Brand ─────────────────────────────────────────── */}
             <div className="sidebar-logo">
                 <div className="logo-mark">
                     <div className="logo-icon">
@@ -54,9 +54,12 @@ export default function Sidebar() {
                         <span className="logo-sub">ERP System</span>
                     </div>
                 </div>
+                <button className="sidebar-close-btn" onClick={onClose} aria-label="Close menu">
+                    <X size={20} />
+                </button>
             </div>
 
-            {/* ── Nav ──────────────────────────────────────────────────────────── */}
+            {/* ── Nav ────────────────────────────────────────────── */}
             <nav className="sidebar-nav">
                 <div className="nav-section-title">Main Menu</div>
                 {links.map(({ label, path, icon: Icon }) => (
@@ -64,6 +67,7 @@ export default function Sidebar() {
                         key={path}
                         to={path}
                         className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+                        onClick={onClose}
                     >
                         <Icon size={17} className="nav-icon" />
                         <span>{label}</span>
@@ -71,7 +75,7 @@ export default function Sidebar() {
                 ))}
             </nav>
 
-            {/* ── Footer ───────────────────────────────────────────────────────── */}
+            {/* ── Footer ─────────────────────────────────────────── */}
             <div className="sidebar-footer">
                 <div className="sidebar-user">
                     <div className="user-avatar">

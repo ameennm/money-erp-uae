@@ -1025,14 +1025,100 @@ textarea {
   color: var(--brand-accent);
 }
 
-/* ─── Responsive ─────────────────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .sidebar {
-    width: 100%;
-    height: auto;
-    position: relative;
+/* ─── Mobile Sidebar Toggle ──────────────────────────────────────────────── */
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 4px;
+  border-radius: 6px;
+  transition: background var(--transition);
+}
+
+.mobile-menu-btn:hover {
+  background: var(--bg-card);
+}
+
+.sidebar-close-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.sidebar-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+
+/* Tablet */
+@media (max-width: 1024px) {
+  .page-body {
+    padding: 20px;
   }
 
+  .stats-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+
+  /* Hamburger menu button */
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .sidebar-close-btn {
+    display: flex;
+  }
+
+  /* Sidebar off-canvas */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 300;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Overlay behind sidebar */
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 250;
+    animation: fadeIn 0.2s ease;
+  }
+
+  /* Main content full width */
   .main-content {
     margin-left: 0;
   }
@@ -1041,30 +1127,187 @@ textarea {
     padding: 16px;
   }
 
+  /* Topbar */
+  .topbar {
+    padding: 0 16px;
+    height: 56px;
+  }
+
+  .topbar-title {
+    font-size: 16px;
+  }
+
+  /* Grid layouts */
   .grid-2 {
     grid-template-columns: 1fr;
   }
 
-  .topbar {
-    padding: 0 16px;
-  }
-
   .stats-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
 
+  /* Stat cards */
   .stat-card {
-    padding: 16px;
+    padding: 14px;
   }
 
   .stat-value {
-    font-size: clamp(16px, 4vw, 22px);
+    font-size: clamp(15px, 4vw, 20px);
   }
 
   .stat-icon {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     margin-bottom: 10px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+  }
+
+  /* Table improvements */
+  .data-table {
+    font-size: 12px;
+  }
+
+  .data-table th {
+    padding: 10px 12px;
+    font-size: 10px;
+  }
+
+  .data-table td {
+    padding: 10px 12px;
+  }
+
+  /* Modal full screen on mobile */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal {
+    max-width: 100%;
+    max-height: 95vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: slideUpMobile 0.3s ease;
+  }
+
+  .modal-header {
+    padding: 16px 20px 14px;
+  }
+
+  .modal-body {
+    padding: 16px 20px;
+  }
+
+  .modal-footer {
+    padding: 14px 20px 20px;
+  }
+
+  .modal-title {
+    font-size: 16px;
+  }
+
+  /* Form rows single column on mobile */
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .form-input,
+  .form-select,
+  .form-textarea {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  /* Buttons wrap properly */
+  .btn {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  /* Cards */
+  .card {
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .card-header {
+    margin-bottom: 14px;
+  }
+
+  .card-title {
+    font-size: 14px;
+  }
+
+  /* FAB */
+  .fab {
+    bottom: 20px;
+    right: 20px;
+    width: 48px;
+    height: 48px;
+  }
+
+  /* Login */
+  .login-box {
+    padding: 32px 24px;
+    margin: 12px;
+  }
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+
+  .stat-value {
+    font-size: clamp(14px, 5vw, 18px);
+  }
+
+  .topbar-title {
+    font-size: 14px;
+  }
+
+  .topbar {
+    height: 50px;
+  }
+
+  .page-body {
+    padding: 12px;
+  }
+
+  .btn {
+    font-size: 12px;
+    padding: 7px 12px;
+  }
+
+  .badge {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+}
+
+@keyframes slideUpMobile {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

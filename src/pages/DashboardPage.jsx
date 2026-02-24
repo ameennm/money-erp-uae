@@ -259,7 +259,7 @@ export default function DashboardPage() {
                             </button>
                         </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px,1fr))', gap: 14, marginBottom: 28 }}>
+                    <div className="stats-grid" style={{ marginBottom: 28 }}>
                         {/* Total SAR Balance */}
                         <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.25)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
