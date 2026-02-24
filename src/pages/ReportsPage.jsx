@@ -211,7 +211,7 @@ export default function ReportsPage() {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)', marginBottom: 12 }}>
                 Ledger Summary — {dateRange}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px,1fr))', gap: 14, marginBottom: 28 }}>
+            <div className="stats-grid" style={{ marginBottom: 28 }}>
                 {currencies.map(cur => {
                     const t = totals[cur];
                     const colors = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' };
@@ -263,31 +263,31 @@ export default function ReportsPage() {
             </div>
 
             {/* ── Type Checkboxes + Search + Download ─────────────── */}
-            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-                <div className="flex gap-4" style={{ fontSize: 13 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: showTx ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                <div className="flex gap-4 flex-wrap" style={{ fontSize: 13 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showTx ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
                         <input type="checkbox" checked={showTx} onChange={e => setShowTx(e.target.checked)}
                             style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
                         Transactions
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: showIncome ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showIncome ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
                         <input type="checkbox" checked={showIncome} onChange={e => setShowIncome(e.target.checked)}
                             style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
                         Income
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: showExpense ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showExpense ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
                         <input type="checkbox" checked={showExpense} onChange={e => setShowExpense(e.target.checked)}
                             style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
                         Expenses
                     </label>
                 </div>
-                <div className="flex gap-3 flex-1 min-w-[240px]">
+                <div className="flex gap-2 w-full md:w-auto">
                     <div style={{ position: 'relative', flex: 1 }}>
                         <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                        <input className="form-input" style={{ paddingLeft: 38 }} placeholder="Search particulars..."
+                        <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search particulars..."
                             value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
-                    <button className="btn btn-accent" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-outline" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
                         <Download size={16} /> Excel
                     </button>
                 </div>

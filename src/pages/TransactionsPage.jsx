@@ -332,7 +332,7 @@ export default function TransactionsPage() {
     return (
         <Layout title="Transactions">
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     {DATE_RANGES.map(r => (
                         <button key={r} onClick={() => setDateRange(r)}
                             className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
@@ -347,22 +347,24 @@ export default function TransactionsPage() {
                         </>
                     )}
                 </div>
-                <div className="flex gap-3 flex-1 min-w-[300px]">
-                    <div style={{ position: 'relative', flex: 1 }}>
+                <div className="flex gap-3 flex-1 flex-wrap w-full mt-2 sm:mt-0">
+                    <div style={{ position: 'relative', flex: '1 1 200px' }}>
                         <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                        <input className="form-input" style={{ paddingLeft: 38 }} placeholder="Search client or ID..."
+                        <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search client or ID..."
                             value={filter} onChange={e => setFilter(e.target.value)} />
                     </div>
-                    {isAdmin && (
-                        <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
-                            <Download size={16} /> Excel
-                        </button>
-                    )}
-                    {isCollector && (
-                        <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
-                            <Plus size={16} /> New Transaction
-                        </button>
-                    )}
+                    <div className="flex gap-2 flex-wrap">
+                        {isAdmin && (
+                            <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
+                                <Download size={16} /> Excel
+                            </button>
+                        )}
+                        {isCollector && (
+                            <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
+                                <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
