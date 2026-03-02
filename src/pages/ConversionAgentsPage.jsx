@@ -4,9 +4,10 @@ import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import {
     Plus, X, Pencil, Trash2, RefreshCw, Phone,
-    TrendingUp, Banknote, Wallet, Calendar, List
+    TrendingUp, Banknote, Wallet, Calendar, List, Download
 } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
 
@@ -210,6 +211,23 @@ export default function ConversionAgentsPage() {
 
                 const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
 
+                const exportLedgerExcel = () => {
+                    const rows = filteredTxs.map((r, idx) => ({
+                        '#': idx + 1,
+                        'Date': r.date || '',
+                        'SAR Sent': Number(r.sar_amount),
+                        'Rate': r.sar_rate,
+                        'AED Received': Number(r.aed_amount),
+                        'AED Running Balance': Number(r.running_aed),
+                        'Profit INR': Number(r.profit_inr || 0),
+                        'Notes': r.notes || '',
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, viewingAgent.name);
+                    XLSX.writeFile(wb, `conversion_${viewingAgent.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+                };
+
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
                         <div className="modal" style={{ maxWidth: '950px', width: '90%', maxHeight: '90vh' }}>
@@ -220,7 +238,12 @@ export default function ConversionAgentsPage() {
                                         SAR → AED conversions handled by this agent
                                     </div>
                                 </div>
-                                <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <button className="btn btn-outline btn-sm" onClick={exportLedgerExcel} title="Export to Excel">
+                                        <Download size={14} /> Excel
+                                    </button>
+                                    <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                                </div>
                             </div>
                             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
                                 {/* Filters */}

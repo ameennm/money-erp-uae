@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
-import { dbService } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Trash2, TrendingDown, TrendingUp } from 'lucide-react';
+import { Plus, X, Trash2, TrendingDown, TrendingUp, Download } from 'lucide-react';
 import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const EXPENSE_CATEGORIES = [
     'Office Rent', 'Salaries', 'Commission', 'Transfer Fees',
     'Bank Charges', 'Utilities', 'Marketing', 'Miscellaneous'
 ];
-const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Other Income'];
+const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Agent Payment', 'Other Income'];
 
-const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '' };
+const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', distributor_id: '', distributor_name: '' };
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
+    const [distributors, setDistributors] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY);
@@ -23,8 +25,12 @@ export default function ExpensesPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const r = await dbService.listExpenses();
+            const [r, dr] = await Promise.all([
+                dbService.listExpenses(),
+                dbService.listAgents([Query.equal('type', 'distributor')]),
+            ]);
             setExpenses(r.documents);
+            setDistributors(dr.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -45,10 +51,19 @@ export default function ExpensesPage() {
         ev.preventDefault();
         setSaving(true);
         try {
-            await dbService.createExpense({
+            const payload = {
                 ...form,
                 amount: parseFloat(form.amount) || 0,
-            });
+            };
+            // If category is Commission and a distributor is selected, set name
+            if (form.category === 'Commission' && form.distributor_id) {
+                const dist = distributors.find(d => d.$id === form.distributor_id);
+                payload.distributor_name = dist ? dist.name : '';
+            } else {
+                payload.distributor_id = '';
+                payload.distributor_name = '';
+            }
+            await dbService.createExpense(payload);
             toast.success('Record saved');
             setModal(false);
             setForm(EMPTY);
@@ -71,8 +86,26 @@ export default function ExpensesPage() {
         }
     };
 
+    const exportToExcel = () => {
+        const rows = expenses.map((e, i) => ({
+            '#': i + 1,
+            'Type': e.type === 'income' ? 'Income' : 'Expense',
+            'Title': e.title,
+            'Category': e.category,
+            'Amount': Number(e.amount || 0),
+            'Currency': e.currency,
+            'Distributor': e.distributor_name || '',
+            'Date': e.date || (e.$createdAt ? format(new Date(e.$createdAt), 'dd MMM yyyy') : ''),
+            'Notes': e.notes || '',
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Income & Ops');
+        XLSX.writeFile(wb, `income_ops_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    };
+
     return (
-        <Layout title="Income & Ops">
+        <Layout title="Income &amp; Ops">
             {/* Summary */}
             <div className="stats-grid mb-6">
                 {/* Income by currency */}
@@ -119,6 +152,9 @@ export default function ExpensesPage() {
                     {expenses.length} record{expenses.length !== 1 ? 's' : ''}
                 </div>
                 <div className="flex gap-3">
+                    <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
+                        <Download size={15} /> Excel
+                    </button>
                     <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
                         <Plus size={16} /> Add Income
                     </button>
@@ -146,6 +182,7 @@ export default function ExpensesPage() {
                                     <th>#</th>
                                     <th>Title</th>
                                     <th>Category</th>
+                                    <th>Distributor</th>
                                     <th>Amount</th>
                                     <th>Currency</th>
                                     <th>Date</th>
@@ -165,6 +202,9 @@ export default function ExpensesPage() {
                                         </td>
                                         <td>
                                             <span className="pill">{exp.category}</span>
+                                        </td>
+                                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                            {exp.distributor_name || '—'}
                                         </td>
                                         <td>
                                             <span className="currency" style={{ color: exp.type === 'income' ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
@@ -215,7 +255,7 @@ export default function ExpensesPage() {
                                     <div className="form-group">
                                         <label className="form-label">Category</label>
                                         <select id="exp-category" className="form-select"
-                                            value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                                            value={form.category} onChange={e => setForm({ ...form, category: e.target.value, distributor_id: '', distributor_name: '' })}>
                                             {(form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => <option key={c}>{c}</option>)}
                                         </select>
                                     </div>
@@ -229,6 +269,29 @@ export default function ExpensesPage() {
                                         </select>
                                     </div>
                                 </div>
+
+                                {/* Distributor dropdown — only for Commission category */}
+                                {form.category === 'Commission' && form.type === 'expense' && (
+                                    <div className="form-group">
+                                        <label className="form-label">Distributor (Commission for)</label>
+                                        <select
+                                            className="form-select"
+                                            value={form.distributor_id}
+                                            onChange={e => setForm({ ...form, distributor_id: e.target.value })}
+                                        >
+                                            <option value="">— Select Distributor —</option>
+                                            {distributors.map(d => (
+                                                <option key={d.$id} value={d.$id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                        {form.distributor_id && (
+                                            <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 4 }}>
+                                                ✓ This commission will appear in {distributors.find(d => d.$id === form.distributor_id)?.name}'s ledger
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 <div className="form-row">
                                     <div className="form-group">
                                         <label className="form-label">Amount *</label>

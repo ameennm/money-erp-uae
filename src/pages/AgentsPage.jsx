@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, MessageCircle, Banknote } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, MessageCircle, Banknote, Download } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
 
@@ -307,6 +308,23 @@ export default function AgentsPage() {
                     ? round2(viewingAgent.aed_balance || 0)
                     : round2(viewingAgent.sar_balance || 0);
 
+                const exportLedgerExcel = () => {
+                    const rows = filteredTxs.map((t, idx) => ({
+                        '#': idx + 1,
+                        'Date': t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yyyy HH:mm') : '',
+                        'Ref': '#' + t.tx_id,
+                        'Client': t.client_name,
+                        'Collected': Number(t.collected_amount),
+                        'Currency': t.collected_currency,
+                        'Running Balance': Number(t.running_balance),
+                        'Status': t.status,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, viewingAgent.name);
+                    XLSX.writeFile(wb, `agent_${viewingAgent.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+                };
+
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
                         <div className="modal" style={{ maxWidth: '900px', width: '90%', maxHeight: '90vh' }}>
@@ -328,6 +346,9 @@ export default function AgentsPage() {
                                             <Banknote size={15} /> Receive
                                         </button>
                                     )}
+                                    <button className="btn btn-outline btn-sm" onClick={exportLedgerExcel} title="Export to Excel">
+                                        <Download size={14} /> Excel
+                                    </button>
                                     <button
                                         className="btn btn-sm"
                                         style={{ background: '#25D366', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}

@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Trash2, UserCog, Eye, Pencil, SendHorizonal, Calendar } from 'lucide-react';
+import { Plus, X, Trash2, UserCog, Eye, Pencil, SendHorizonal, Calendar, Download } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
 
@@ -263,7 +264,20 @@ export default function DistributorsPage() {
                     status: 'completed'
                 }));
 
-                let combined = [...distEvents, ...depEvents].sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+                // Commission expenses linked to this distributor
+                let commEvents = expenseRecs.filter(e =>
+                    e.category === 'Commission' && e.distributor_id === viewingDist.$id
+                ).map(e => ({
+                    type: 'commission',
+                    $createdAt: e.$createdAt || e.date,
+                    $id: e.$id + '_comm',
+                    amount: -Number(e.amount),  // debit from distributor balance
+                    ref: 'COM',
+                    details: `Commission (${e.currency} ${Number(e.amount).toLocaleString()})`,
+                    status: 'completed'
+                }));
+
+                let combined = [...distEvents, ...depEvents, ...commEvents].sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
 
                 let runningINR = 0;
                 combined = combined.map(ev => {
@@ -275,6 +289,23 @@ export default function DistributorsPage() {
 
                 const periodDistributions = filteredEvents.filter(e => e.type === 'distribution');
 
+                const exportLedgerExcel = () => {
+                    const rows = filteredEvents.map((ev, idx) => ({
+                        '#': idx + 1,
+                        'Date': ev.$createdAt ? format(new Date(ev.$createdAt), 'dd MMM yyyy HH:mm') : '',
+                        'Reference': ev.ref,
+                        'Details': ev.details,
+                        'Type': ev.type,
+                        'Credit (INR)': ev.amount > 0 ? ev.amount : '',
+                        'Debit (INR)': ev.amount < 0 ? Math.abs(ev.amount) : '',
+                        'Running Balance': ev.running_balance,
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, viewingDist.name);
+                    XLSX.writeFile(wb, `distributor_${viewingDist.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+                };
+
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingDist(null)}>
                         <div className="modal" style={{ maxWidth: '950px', width: '90%', maxHeight: '90vh' }}>
@@ -282,10 +313,15 @@ export default function DistributorsPage() {
                                 <div>
                                     <h3 className="modal-title">Distributor Ledger: {viewingDist.name}</h3>
                                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        Deposits and completed distributions history
+                                        Deposits, distributions and commission history
                                     </div>
                                 </div>
-                                <button className="close-btn" onClick={() => setViewingDist(null)}><X size={20} /></button>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <button className="btn btn-outline btn-sm" onClick={exportLedgerExcel} title="Export to Excel">
+                                        <Download size={14} /> Excel
+                                    </button>
+                                    <button className="close-btn" onClick={() => setViewingDist(null)}><X size={20} /></button>
+                                </div>
                             </div>
                             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
                                 {/* Filters */}
