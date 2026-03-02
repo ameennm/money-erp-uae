@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, List } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, MessageCircle, Banknote } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 
 const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
@@ -25,6 +25,8 @@ const applyDateRange = (arr, range, from, to) => {
     return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
 };
 
+const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection' };
 
 export default function AgentsPage() {
@@ -39,6 +41,9 @@ export default function AgentsPage() {
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
+    const [paymentModal, setPaymentModal] = useState(false);
+    const [paymentAgent, setPaymentAgent] = useState(null);
+    const [paymentAmount, setPaymentAmount] = useState('');
 
     const fetch = async () => {
         setLoading(true);
@@ -65,9 +70,7 @@ export default function AgentsPage() {
         setModal(true);
     };
 
-    const openHistory = (a) => {
-        setViewingAgent(a);
-    };
+    const openHistory = (a) => { setViewingAgent(a); };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -100,20 +103,85 @@ export default function AgentsPage() {
         }
     };
 
+    const openPayment = (a) => {
+        setPaymentAgent(a);
+        setPaymentAmount('');
+        setPaymentModal(true);
+    };
+
+    const handlePayment = async (e) => {
+        e.preventDefault();
+        const amt = round2(parseFloat(paymentAmount) || 0);
+        if (!amt || amt <= 0) return toast.error('Enter a valid payment amount');
+        const cur = paymentAgent.currency || 'SAR';
+        const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
+        const currentOwed = round2(paymentAgent[owedField] || 0);
+        if (amt > currentOwed + 0.01) {
+            return toast.error(`Agent owes us ${currentOwed.toLocaleString()} ${cur}. Cannot record more than owed.`);
+        }
+        setSaving(true);
+        try {
+            // 1. Reduce agent's owed balance
+            const newOwed = Math.max(0, round2(currentOwed - amt));
+            await dbService.updateAgent(paymentAgent.$id, { [owedField]: newOwed });
+
+            // 2. Record payment as income (increases our SAR/AED balance on dashboard)
+            await dbService.createExpense({
+                title: `Agent Payment — ${paymentAgent.name}`,
+                type: 'income',
+                category: 'Agent Payment',
+                amount: amt,
+                currency: cur,
+                date: new Date().toISOString().split('T')[0],
+                notes: `Received ${amt.toLocaleString()} ${cur} from agent ${paymentAgent.name}`,
+            });
+
+            toast.success(`✅ Recorded ${amt.toLocaleString()} ${cur} received from ${paymentAgent.name}`);
+            setPaymentModal(false);
+            fetch();
+        } catch (err) {
+            toast.error('Failed: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const getAgentTxs = (agentId) => {
         let agentRecords = txs.filter(t => t.collection_agent_id === agentId);
         agentRecords.sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
 
         let runningTotal = 0;
-        const mapped = agentRecords.map(t => {
+        return agentRecords.map(t => {
             runningTotal += Number(t.collected_amount) || 0;
-            return {
-                ...t,
-                running_balance: runningTotal
-            };
+            return { ...t, running_balance: runningTotal };
         });
+    };
 
-        return mapped;
+    const shareAgentLedgerOnWhatsApp = (agent, filteredTxs) => {
+        const cur = agent.currency || 'SAR';
+        const totalCollected = filteredTxs.reduce((s, t) => s + (Number(t.collected_amount) || 0), 0);
+        const owedBal = cur === 'AED'
+            ? round2(agent.aed_balance || 0)
+            : round2(agent.sar_balance || 0);
+
+        const lines = [
+            `📋 *Agent Ledger: ${agent.name}*`,
+            `Period: ${dateRange}`,
+            `─────────────────────`,
+            ...filteredTxs.slice(0, 25).map((t, i) =>
+                `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | #${t.tx_id} | ${t.client_name} | ${Number(t.collected_amount).toLocaleString()} ${t.collected_currency}`
+            ),
+            filteredTxs.length > 25 ? `...and ${filteredTxs.length - 25} more transactions` : '',
+            `─────────────────────`,
+            `Total Collected: *${totalCollected.toLocaleString()} ${cur}*`,
+            `Amount Owed to Us: *${owedBal.toLocaleString()} ${cur}*`,
+            `Transactions: ${filteredTxs.length}`,
+            ``,
+            `_MoneyFlow ERP_`,
+        ].filter(l => l !== undefined);
+
+        const text = encodeURIComponent(lines.join('\n'));
+        window.open(`https://wa.me/?text=${text}`, '_blank');
     };
 
     return (
@@ -149,7 +217,8 @@ export default function AgentsPage() {
                                     <th>Phone</th>
                                     <th>Location</th>
                                     <th>Currency</th>
-                                    <th>Notes</th>
+                                    <th style={{ textAlign: 'right' }}>SAR Owed</th>
+                                    <th style={{ textAlign: 'right' }}>AED Owed</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -194,9 +263,25 @@ export default function AgentsPage() {
                                                 {a.currency || 'SAR'}
                                             </span>
                                         </td>
-                                        <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{a.notes || '—'}</td>
+                                        <td style={{ textAlign: 'right', fontWeight: 700, color: (a.sar_balance || 0) > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                            {round2(a.sar_balance || 0).toLocaleString()}
+                                        </td>
+                                        <td style={{ textAlign: 'right', fontWeight: 700, color: (a.aed_balance || 0) > 0 ? 'var(--brand-gold)' : 'var(--text-muted)' }}>
+                                            {round2(a.aed_balance || 0).toLocaleString()}
+                                        </td>
                                         <td>
                                             <div className="flex gap-2">
+                                                {/* Receive Payment — only show if agent owes us something */}
+                                                {((a.currency === 'AED' ? (a.aed_balance || 0) : (a.sar_balance || 0)) > 0) && (
+                                                    <button
+                                                        className="btn btn-sm"
+                                                        style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 700 }}
+                                                        onClick={() => openPayment(a)}
+                                                        title="Record payment received from agent"
+                                                    >
+                                                        <Banknote size={13} /> Receive
+                                                    </button>
+                                                )}
                                                 <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}>
                                                     <Pencil size={14} />
                                                 </button>
@@ -217,6 +302,10 @@ export default function AgentsPage() {
             {viewingAgent && (() => {
                 const allTxs = getAgentTxs(viewingAgent.$id);
                 const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
+                const cur = viewingAgent.currency || 'SAR';
+                const owedBal = cur === 'AED'
+                    ? round2(viewingAgent.aed_balance || 0)
+                    : round2(viewingAgent.sar_balance || 0);
 
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
@@ -225,10 +314,30 @@ export default function AgentsPage() {
                                 <div>
                                     <h3 className="modal-title">Transaction Ledger: {viewingAgent.name}</h3>
                                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        Showing collections assigned to this agent
+                                        Collections assigned to this agent
                                     </div>
                                 </div>
-                                <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    {owedBal > 0 && (
+                                        <button
+                                            className="btn btn-sm"
+                                            style={{ background: '#00c896', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+                                            onClick={() => { setViewingAgent(null); openPayment(viewingAgent); }}
+                                            title="Record payment received from this agent"
+                                        >
+                                            <Banknote size={15} /> Receive
+                                        </button>
+                                    )}
+                                    <button
+                                        className="btn btn-sm"
+                                        style={{ background: '#25D366', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+                                        onClick={() => shareAgentLedgerOnWhatsApp(viewingAgent, filteredTxs)}
+                                        title="Share on WhatsApp"
+                                    >
+                                        <MessageCircle size={15} /> WhatsApp
+                                    </button>
+                                    <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
+                                </div>
                             </div>
                             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
                                 {/* Filters */}
@@ -248,17 +357,24 @@ export default function AgentsPage() {
                                     )}
                                 </div>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                {/* Summary Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Collections</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                            {filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}> {viewingAgent.currency || 'SAR'}</span>
+                                            {filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
                                         </div>
                                     </div>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transaction Count</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
                                             {filteredTxs.length}
+                                        </div>
+                                    </div>
+                                    <div className="card" style={{ padding: '16px', background: cur === 'AED' ? 'rgba(245,166,35,0.07)' : 'rgba(74,158,255,0.07)', border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.2)' : 'rgba(74,158,255,0.2)'}` }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Owed to Us</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
+                                            {owedBal.toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -310,7 +426,7 @@ export default function AgentsPage() {
                 );
             })()}
 
-            {/* Modal */}
+            {/* Add/Edit Modal */}
             {modal && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(false)}>
                     <div className="modal">
@@ -360,6 +476,84 @@ export default function AgentsPage() {
                     </div>
                 </div>
             )}
+
+            {/* Receive Payment Modal */}
+            {paymentModal && paymentAgent && (() => {
+                const cur = paymentAgent.currency || 'SAR';
+                const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
+                const owed = round2(paymentAgent[owedField] || 0);
+                const amt = parseFloat(paymentAmount) || 0;
+                return (
+                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPaymentModal(false)}>
+                        <div className="modal">
+                            <div className="modal-header">
+                                <div>
+                                    <h3 className="modal-title">Receive Payment — {paymentAgent.name}</h3>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                                        Record {cur} cash received from this agent
+                                    </div>
+                                </div>
+                                <button className="close-btn" onClick={() => setPaymentModal(false)}><X size={20} /></button>
+                            </div>
+                            <form onSubmit={handlePayment}>
+                                <div className="modal-body">
+                                    {/* Owed Summary */}
+                                    <div className="card" style={{ background: 'var(--bg-main)', padding: 16, marginBottom: 16, border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.25)' : 'rgba(74,158,255,0.25)'}` }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent Owes Us:</span>
+                                            <span style={{ fontSize: 22, fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
+                                                {owed.toLocaleString()} {cur}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="form-label">Amount Received ({cur})</label>
+                                        <input
+                                            className="form-input"
+                                            type="number"
+                                            step="0.01"
+                                            min="0.01"
+                                            max={owed}
+                                            required
+                                            autoFocus
+                                            placeholder={`Max ${owed.toLocaleString()} ${cur}`}
+                                            value={paymentAmount}
+                                            onChange={e => setPaymentAmount(e.target.value)}
+                                            style={{ fontSize: 20, fontWeight: 700, height: 52 }}
+                                        />
+                                        {amt > 0 && amt <= owed && (
+                                            <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 6 }}>
+                                                ✓ Remaining after this payment: <strong>{round2(owed - amt).toLocaleString()} {cur}</strong>
+                                            </div>
+                                        )}
+                                        {amt > owed && (
+                                            <div style={{ fontSize: 12, color: 'var(--status-failed)', marginTop: 6 }}>
+                                                ⚠️ Cannot exceed owed amount ({owed.toLocaleString()} {cur})
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div style={{ padding: '10px 14px', background: 'rgba(0,200,150,0.06)', borderRadius: 8, border: '1px solid rgba(0,200,150,0.2)', fontSize: 13, color: 'var(--text-secondary)' }}>
+                                        💡 This will be recorded as <strong>{cur} income</strong>, increasing our {cur} balance on the dashboard.
+                                    </div>
+                                </div>
+                                <div className="modal-footer">
+                                    <button type="button" className="btn btn-outline" onClick={() => setPaymentModal(false)}>Cancel</button>
+                                    <button
+                                        type="submit"
+                                        className="btn btn-accent"
+                                        disabled={saving || !paymentAmount || amt <= 0 || amt > owed + 0.01}
+                                        style={{ minWidth: 160 }}
+                                    >
+                                        {saving ? 'Saving…' : `✅ Confirm Receipt`}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
+            })()}
         </Layout>
     );
 }

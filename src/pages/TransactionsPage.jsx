@@ -55,6 +55,9 @@ const applyDateRange = (txs, range, from, to) => {
 
 const sum = (arr, f) => arr.reduce((a, t) => a + (Number(t[f]) || 0), 0);
 
+// Safe round to 2 decimal places (avoids float precision issues)
+const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+
 const EMPTY = {
     client_name: '',
     inr_requested: '',
@@ -66,6 +69,7 @@ const EMPTY = {
     aed_to_inr_rate: '',
     actual_inr_distributed: '',
     profit_aed: '',
+    profit_inr: '',
     notes: '',
     status: '',
     collection_agent_id: '',
@@ -83,6 +87,7 @@ export default function TransactionsPage() {
 
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
+    const [settings, setSettings] = useState({ min_sar_rate: 0, min_aed_rate: 0 });
     const [filter, setFilter] = useState('');
     const [dateRange, setDateRange] = useState('All Time');
     const [customFrom, setCustomFrom] = useState('');
@@ -102,12 +107,14 @@ export default function TransactionsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [txRes, agRes] = await Promise.all([
+            const [txRes, agRes, sRes] = await Promise.all([
                 dbService.listTransactions(),
                 dbService.listAgents(),
+                dbService.getSettings(),
             ]);
             setTxs(txRes.documents);
             setAgents(agRes.documents);
+            setSettings(sRes);
         } catch (e) { toast.error('Failed to load: ' + e.message); }
         finally { setLoading(false); }
     };
@@ -122,15 +129,17 @@ export default function TransactionsPage() {
         } else {
             aedValue = tx.collected_amount * (parseFloat(sarToAed) || 0);
         }
-
         const aedCostOfInr = ((parseFloat(distributedInr) || 0) / 1000) * (parseFloat(aedToInr) || 0);
         return (aedValue - aedCostOfInr).toFixed(2);
     };
 
-    const safeFloat = (num) => {
-        let n = parseFloat(num);
-        if (isNaN(n)) return 0;
-        return Number.isInteger(n) ? n + 0.00001 : n;
+    // Calculate INR profit from rate spread: (actual_rate - min_rate) / 1000 * inr_requested
+    const calcProfitInr = (collectionRate, currency, inrRequested) => {
+        const minRate = currency === 'AED' ? (settings.min_aed_rate || 0) : (settings.min_sar_rate || 0);
+        const rate = parseFloat(collectionRate) || 0;
+        const inr = parseFloat(inrRequested) || 0;
+        if (minRate <= 0 || rate <= minRate) return 0;
+        return round2((rate - minRate) / 1000 * inr);
     };
 
     const handleSave = async (e) => {
@@ -138,17 +147,18 @@ export default function TransactionsPage() {
         setSaving(true);
         try {
             const payload = { ...form };
-            // Ensure numbers
-            payload.inr_requested = safeFloat(form.inr_requested);
-            payload.collected_amount = safeFloat(form.collected_amount);
+
+            // Use round2 for all amounts to avoid float issues
+            payload.inr_requested = round2(form.inr_requested);
+            payload.collected_amount = round2(form.collected_amount);
 
             // Clean optional floats
-            const optionalFloats = ['collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed'];
+            const optionalFloats = ['collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed', 'profit_inr'];
             optionalFloats.forEach(f => {
                 if (payload[f] === '' || payload[f] === undefined) {
                     delete payload[f];
                 } else if (!isNaN(parseFloat(payload[f]))) {
-                    payload[f] = safeFloat(payload[f]);
+                    payload[f] = round2(payload[f]);
                 }
             });
 
@@ -161,25 +171,56 @@ export default function TransactionsPage() {
                     return toast.error('Please select a Distributor');
                 }
 
+                // ── Min rate enforcement ──
+                const currency = form.collected_currency;
+                const minRate = currency === 'AED' ? (settings.min_aed_rate || 0) : (settings.min_sar_rate || 0);
+                const collRate = parseFloat(form.collection_rate) || 0;
+                if (minRate > 0 && collRate < minRate) {
+                    setSaving(false);
+                    return toast.error(
+                        `Rate too low! Minimum ${currency} rate is ${minRate} per 1000 INR. You entered ${collRate}.`,
+                        { duration: 5000 }
+                    );
+                }
+
                 payload.tx_id = genTxId(txs);
                 payload.creator_id = user.$id;
                 payload.creator_name = user.name;
                 payload.status = 'completed';
-                payload.actual_inr_distributed = safeFloat(payload.inr_requested);
+                payload.actual_inr_distributed = round2(payload.inr_requested);
 
-                // Check distributor balance before deducting
+                // ── Calculate INR profit from rate spread ──
+                const profitInr = calcProfitInr(form.collection_rate, currency, payload.inr_requested);
+                if (profitInr > 0) payload.profit_inr = profitInr;
+
+                // ── Check distributor balance (use round2 to avoid precision bugs) ──
                 const dist = agents.find(a => a.$id === payload.distributor_id);
                 if (dist) {
-                    const currentBal = Number(dist.inr_balance) || 0;
-                    if (payload.inr_requested > currentBal) {
+                    const currentBal = round2(dist.inr_balance || 0);
+                    const needed = round2(payload.inr_requested);
+                    if (needed > currentBal) {
                         setSaving(false);
                         return toast.error(
-                            `Insufficient balance! ${dist.name} has ₹${currentBal.toLocaleString('en-IN')} but ₹${payload.inr_requested.toLocaleString('en-IN')} is needed. Deposit ₹${(payload.inr_requested - currentBal).toLocaleString('en-IN')} more.`,
+                            `Insufficient balance! ${dist.name} has ₹${currentBal.toLocaleString('en-IN')} but ₹${needed.toLocaleString('en-IN')} is needed. Deposit ₹${(needed - currentBal).toLocaleString('en-IN')} more.`,
                             { duration: 5000 }
                         );
                     }
-                    const newBal = currentBal - payload.inr_requested;
-                    await dbService.updateAgent(dist.$id, { inr_balance: safeFloat(newBal) });
+                    const newBal = round2(currentBal - needed);
+                    await dbService.updateAgent(dist.$id, { inr_balance: newBal });
+                }
+
+                // ── Update collection agent's owed balance (SAR/AED receivable) ──
+                if (payload.collection_agent_id) {
+                    const agent = agents.find(a => a.$id === payload.collection_agent_id);
+                    if (agent) {
+                        if (currency === 'AED') {
+                            const newAedBal = round2((agent.aed_balance || 0) + payload.collected_amount);
+                            await dbService.updateAgent(agent.$id, { aed_balance: newAedBal });
+                        } else {
+                            const newSarBal = round2((agent.sar_balance || 0) + payload.collected_amount);
+                            await dbService.updateAgent(agent.$id, { sar_balance: newSarBal });
+                        }
+                    }
                 }
 
                 await dbService.createTransaction(payload);
@@ -218,17 +259,17 @@ export default function TransactionsPage() {
         setSaving(true);
         try {
             const inrRate = parseFloat(form.aed_to_inr_rate);
-            const inrDist = parseFloat(form.actual_inr_distributed);
+            const inrDist = round2(form.actual_inr_distributed);
 
             // Calculate Profit in AED
             const profit = calculateProfit(activeTx, activeTx.sar_to_aed_rate, inrRate, inrDist);
 
             const dist = agents.find(a => a.$id === (form.distributor_id || activeTx.distributor_id));
             if (dist) {
-                const diff = inrDist - (activeTx.inr_requested || 0);
+                const diff = round2(inrDist - (activeTx.inr_requested || 0));
                 if (diff !== 0) {
-                    const newBal = (Number(dist.inr_balance) || 0) - diff;
-                    await dbService.updateAgent(dist.$id, { inr_balance: parseFloat(newBal.toFixed(2)) });
+                    const newBal = round2((Number(dist.inr_balance) || 0) - diff);
+                    await dbService.updateAgent(dist.$id, { inr_balance: newBal });
                 }
             }
 
@@ -283,8 +324,21 @@ export default function TransactionsPage() {
             if (tx.status === 'completed' && tx.distributor_id && tx.inr_requested) {
                 const dist = agents.find(a => a.$id === tx.distributor_id);
                 if (dist) {
-                    const restored = (Number(dist.inr_balance) || 0) + Number(tx.inr_requested);
-                    await dbService.updateAgent(dist.$id, { inr_balance: safeFloat(restored) });
+                    const restored = round2((Number(dist.inr_balance) || 0) + Number(tx.inr_requested));
+                    await dbService.updateAgent(dist.$id, { inr_balance: restored });
+                }
+            }
+            // Reverse collection agent SAR/AED balance
+            if (tx.collection_agent_id && tx.collected_amount) {
+                const agent = agents.find(a => a.$id === tx.collection_agent_id);
+                if (agent) {
+                    if (tx.collected_currency === 'AED') {
+                        const newAedBal = round2((Number(agent.aed_balance) || 0) - Number(tx.collected_amount));
+                        await dbService.updateAgent(agent.$id, { aed_balance: Math.max(0, newAedBal) });
+                    } else {
+                        const newSarBal = round2((Number(agent.sar_balance) || 0) - Number(tx.collected_amount));
+                        await dbService.updateAgent(agent.$id, { sar_balance: Math.max(0, newSarBal) });
+                    }
                 }
             }
             await dbService.deleteTransaction(tx.$id);
@@ -313,11 +367,11 @@ export default function TransactionsPage() {
             'Collection Agent': tx.collection_agent_name || '',
             'Distributor': tx.distributor_name || '',
             'INR Distributed': tx.actual_inr_distributed || 0,
+            'Profit INR': tx.profit_inr || 0,
             'Status': tx.status || '',
             'Notes': tx.notes || '',
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
-        // Auto-size columns
         const colWidths = Object.keys(rows[0]).map(key => ({
             wch: Math.max(key.length, ...rows.map(r => String(r[key]).length)) + 2
         }));
@@ -328,6 +382,16 @@ export default function TransactionsPage() {
         XLSX.writeFile(wb, fileName);
         toast.success(`Downloaded ${filtered.length} transactions`);
     };
+
+    // Derive min rate hint for form
+    const minRateForCurrency = form.collected_currency === 'AED'
+        ? (settings.min_aed_rate || 0)
+        : (settings.min_sar_rate || 0);
+
+    // Preview profit in form
+    const previewProfit = form.collection_rate && form.inr_requested
+        ? calcProfitInr(form.collection_rate, form.collected_currency, form.inr_requested)
+        : 0;
 
     return (
         <Layout title="Transactions">
@@ -378,6 +442,7 @@ export default function TransactionsPage() {
                                 <th>Requested</th>
                                 <th>Collected</th>
                                 <th>Agent</th>
+                                <th>Profit ₹</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -392,6 +457,9 @@ export default function TransactionsPage() {
                                         {tx.collected_amount?.toLocaleString()} {tx.collected_currency}
                                     </td>
                                     <td>{tx.collection_agent_name || '—'}</td>
+                                    <td style={{ color: tx.profit_inr > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: tx.profit_inr > 0 ? 700 : 400 }}>
+                                        {tx.profit_inr > 0 ? `₹${Number(tx.profit_inr).toLocaleString('en-IN')}` : '—'}
+                                    </td>
                                     <td>{statusBadge(tx.status)}</td>
                                     <td>
                                         <div className="flex gap-2">
@@ -463,15 +531,31 @@ export default function TransactionsPage() {
                                         </select>
                                     </div>
                                     <div className="form-group">
-                                        <label className="form-label">Collection Rate (per 1000 INR)</label>
+                                        <label className="form-label">
+                                            Collection Rate (per 1000 INR)
+                                            {minRateForCurrency > 0 && !editTx && (
+                                                <span style={{ marginLeft: 6, fontSize: 11, color: '#f5a623', fontWeight: 700 }}>
+                                                    — Min: {minRateForCurrency}
+                                                </span>
+                                            )}
+                                        </label>
                                         <input className="form-input" type="number" step="0.01" required value={form.collection_rate}
-                                            placeholder="e.g. 39.9"
+                                            placeholder={minRateForCurrency > 0 ? `Min ${minRateForCurrency}` : 'e.g. 39.9'}
+                                            style={{
+                                                borderColor: !editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency
+                                                    ? 'var(--status-failed)' : undefined
+                                            }}
                                             onChange={e => {
                                                 const rate = parseFloat(e.target.value) || 0;
                                                 const inr = parseFloat(form.inr_requested) || 0;
                                                 const collected = rate > 0 ? (inr / 1000) * rate : form.collected_amount;
                                                 setForm({ ...form, collection_rate: e.target.value, collected_amount: rate > 0 ? collected.toFixed(2) : form.collected_amount });
                                             }} />
+                                        {!editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency && (
+                                            <div style={{ fontSize: 11, color: 'var(--status-failed)', marginTop: 4 }}>
+                                                ⚠️ Rate is below minimum ({minRateForCurrency}) — transaction will be blocked
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Amount Collected ({form.collected_currency})</label>
@@ -479,6 +563,19 @@ export default function TransactionsPage() {
                                             readOnly style={{ backgroundColor: 'var(--bg-main)', opacity: 0.8 }} />
                                     </div>
                                 </div>
+
+                                {/* Profit Preview */}
+                                {!editTx && previewProfit > 0 && (
+                                    <div style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                            📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>₹{previewProfit.toLocaleString('en-IN')}</strong>
+                                            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
+                                                (rate spread: {parseFloat(form.collection_rate) - minRateForCurrency} × {form.inr_requested}/1000)
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
+
                                 <div className="form-row">
                                     <div className="form-group">
                                         <label className="form-label">Distributor (Auto-Deducts)</label>
@@ -492,7 +589,7 @@ export default function TransactionsPage() {
                                                 });
                                             }}>
                                             <option value="">Select Distributor</option>
-                                            {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{a.inr_balance || 0})</option>)}
+                                            {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
                                         </select>
                                     </div>
                                 </div>
@@ -574,7 +671,7 @@ export default function TransactionsPage() {
                                             setForm({ ...form, distributor_id: e.target.value, distributor_name: a?.name || '' });
                                         }}>
                                         <option value="">Select Distributor</option>
-                                        {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{a.inr_balance || 0})</option>)}
+                                        {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
                                     </select>
                                 </div>
                                 <div className="form-row">

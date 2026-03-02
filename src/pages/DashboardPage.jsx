@@ -4,11 +4,13 @@ import Layout from '../components/Layout';
 import {
     ArrowLeftRight, Users, UserCog,
     TrendingUp, SendHorizonal,
-    Banknote, CheckCircle, Wallet, X
+    Banknote, Wallet, X, PiggyBank, CircleDollarSign
 } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+
+const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sumF = (arr, f) => arr.reduce((a, d) => a + (Number(d[f]) || 0), 0);
@@ -184,29 +186,46 @@ export default function DashboardPage() {
     const incByCur = (cur) => expenseRecs.filter(e => e.type === 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const expByCur = (cur) => expenseRecs.filter(e => e.type !== 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
-    // SAR Balance = SAR collected - SAR converted + SAR income - SAR expenses
+    // SAR Balance = only SAR we've actually received (agent payments recorded as income)
+    //              minus SAR already bulk-converted to AED
+    // NOTE: totalSARCollected is NOT included here — agents physically hold that until they pay us
     const totalSARCollected = sumF(fTxs.filter(t => t.collected_currency === 'SAR'), 'collected_amount');
     const totalSARConverted = sumF(convRecs, 'sar_amount');
-    const balanceSAR = totalSARCollected - totalSARConverted + incByCur('SAR') - expByCur('SAR');
+    const balanceSAR = incByCur('SAR') - totalSARConverted - expByCur('SAR');
 
-    // AED Balance = AED collected + AED from SAR conversions + AED income - AED expenses
+    // AED Balance = AED from SAR conversions + AED actually received from agents (agent payments)
+    //              + other AED income - AED expenses - AED converted to INR
+    // NOTE: totalAEDCollected from transactions NOT included — agents physically hold it until they pay us
     const totalAEDCollected = sumF(fTxs.filter(t => t.collected_currency === 'AED'), 'collected_amount');
     const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
     const totalAEDConvertedToINR = expenseRecs.filter(e => e.category === 'AED→INR Conversion' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const balanceAED = totalAEDCollected + totalAEDFromConversions + incByCur('AED') - expByCur('AED') - totalAEDConvertedToINR;
+    const balanceAED = totalAEDFromConversions + incByCur('AED') - expByCur('AED') - totalAEDConvertedToINR;
 
-    // INR Balance = total INR received (from conversions + income) minus general INR expenses (NOT distributor deposits)
+    // INR Balance = total INR received (deposits) minus general expenses minus INR already paid out to clients
     const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const balanceINR = incByCur('INR') - inrGeneralExpenses;
+    // totalINRDistributed must be computed before balanceINR so we can use it here
+    const totalINRDistributed = sumF(completed, 'actual_inr_distributed');
+    const balanceINR = Math.max(0, round2(incByCur('INR') - inrGeneralExpenses - totalINRDistributed));
 
     // INR deposited to distributors
     const inrDepositedToDistributors = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
     // INR Not Given to Distributor = INR Balance - what's already deposited to distributors
-    const inrNotGiven = balanceINR - inrDepositedToDistributors;
+    const inrNotGiven = Math.max(0, round2(balanceINR - inrDepositedToDistributors));
 
-    // INR Distributed = total INR sent to clients from completed transactions
-    const totalINRDistributed = sumF(completed, 'actual_inr_distributed');
+    // (totalINRDistributed already declared above)
+
+    // Total Profit INR = sum of profit_inr across all filtered txs
+    const totalProfitInr = sumF(fTxs, 'profit_inr');
+
+    // Agents owed SAR/AED (from their balance fields)
+    const collectionAgents = agents.filter(a => a.type && a.type.startsWith('collection'));
+    const totalAgentsOweSAR = collectionAgents
+        .filter(a => (a.currency || 'SAR') === 'SAR')
+        .reduce((s, a) => s + round2(a.sar_balance || 0), 0);
+    const totalAgentsOweAED = collectionAgents
+        .filter(a => (a.currency || 'SAR') === 'AED')
+        .reduce((s, a) => s + round2(a.aed_balance || 0), 0);
 
     const recentTxs = fTxs.slice(0, 8);
 
@@ -323,6 +342,48 @@ export default function DashboardPage() {
                                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>INR Not Given to Distributor</div>
                                     <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#ffaa32', lineHeight: 1 }}>₹{inrNotGiven.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending deposit to distributors</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Agents Owe SAR */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.25)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(74,158,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a9eff', flexShrink: 0 }}>
+                                    <Users size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Agents Owe SAR</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{totalAgentsOweSAR.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending collection from SAR agents</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Agents Owe AED */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(245,166,35,0.25)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245,166,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-gold)', flexShrink: 0 }}>
+                                    <Users size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Agents Owe AED</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{totalAgentsOweAED.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending collection from AED agents</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Total Profit INR */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(0,200,150,0.3)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(0,200,150,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-accent)', flexShrink: 0 }}>
+                                    <PiggyBank size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-accent)', lineHeight: 1 }}>₹{totalProfitInr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Total INR Transferred: <strong style={{ color: 'var(--text-secondary)' }}>₹{totalINRDistributed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></div>
                                 </div>
                             </div>
                         </div>

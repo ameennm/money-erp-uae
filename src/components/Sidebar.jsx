@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
     LayoutDashboard, ArrowLeftRight, Users, UserCog,
-    TrendingDown, LogOut, Wallet, RefreshCw, PiggyBank, FileSpreadsheet, X
+    TrendingDown, LogOut, Wallet, RefreshCw, FileSpreadsheet, Settings, X
 } from 'lucide-react';
 
 const NAV = {
@@ -14,6 +14,7 @@ const NAV = {
         { label: 'Distributors', path: '/distributors', icon: UserCog },
         { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
         { label: 'Reports', path: '/reports', icon: FileSpreadsheet },
+        { label: 'Settings', path: '/settings', icon: Settings },
     ],
     collector: [
         { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },

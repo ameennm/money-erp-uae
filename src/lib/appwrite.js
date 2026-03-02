@@ -12,6 +12,7 @@ export const APPWRITE_CONFIG = {
         expenses: 'expenses',
         credits: 'credits',
         aed_conversions: 'aed_conversions',
+        settings: 'settings',
     },
 };
 
@@ -40,6 +41,8 @@ export const authService = {
 const DB = APPWRITE_CONFIG.databaseId;
 const COL = APPWRITE_CONFIG.collections;
 
+const SETTINGS_DOC_ID = 'global_settings';
+
 export const dbService = {
     // Transactions
     async createTransaction(data) { return databases.createDocument(DB, COL.transactions, ID.unique(), data); },
@@ -53,7 +56,6 @@ export const dbService = {
     async createAgent(data) { return databases.createDocument(DB, COL.agents, ID.unique(), data); },
     async updateAgent(id, data) { return databases.updateDocument(DB, COL.agents, id, data); },
     async deleteAgent(id) { return databases.deleteDocument(DB, COL.agents, id); },
-
 
     // Employees
     async listEmployees(q = []) { return databases.listDocuments(DB, COL.employees, q); },
@@ -76,6 +78,23 @@ export const dbService = {
     async listAedConversions(q = []) { return databases.listDocuments(DB, COL.aed_conversions, [Query.orderDesc('$createdAt'), Query.limit(200), ...q]); },
     async createAedConversion(data) { return databases.createDocument(DB, COL.aed_conversions, ID.unique(), data); },
     async deleteAedConversion(id) { return databases.deleteDocument(DB, COL.aed_conversions, id); },
+
+    // Settings (single global doc)
+    async getSettings() {
+        try {
+            return await databases.getDocument(DB, COL.settings, SETTINGS_DOC_ID);
+        } catch {
+            // Document doesn't exist yet — return defaults
+            return { min_sar_rate: 0, min_aed_rate: 0 };
+        }
+    },
+    async upsertSettings(data) {
+        try {
+            return await databases.updateDocument(DB, COL.settings, SETTINGS_DOC_ID, data);
+        } catch {
+            return await databases.createDocument(DB, COL.settings, SETTINGS_DOC_ID, data);
+        }
+    },
 };
 
 export { Query, ID };

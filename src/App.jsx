@@ -11,6 +11,7 @@ import ExpensesPage from './pages/ExpensesPage';
 import ConversionAgentsPage from './pages/ConversionAgentsPage';
 import CreditsPage from './pages/CreditsPage';
 import ReportsPage from './pages/ReportsPage';
+import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -62,6 +63,11 @@ export default function App() {
           } />
           <Route path="/reports" element={
             <ProtectedRoute roles={['admin', 'collector']}><ReportsPage /></ProtectedRoute>
+          } />
+
+          {/* Admin only — Settings */}
+          <Route path="/settings" element={
+            <ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>
           } />
 
           {/* Fallback */}

@@ -66,17 +66,13 @@ export default function DistributorsPage() {
     const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
     const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositModal(true); };
 
-    const safeFloat = (num) => {
-        let n = parseFloat(num);
-        if (isNaN(n)) return 0;
-        return Number.isInteger(n) ? n + 0.00001 : n;
-    };
+    const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
     // Available INR (not given to distributors)
-    const inrIncome = expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const inrGeneralExp = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const inrDeposited = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const availableINR = inrIncome - inrGeneralExp - inrDeposited;
+    const inrIncome = round2(expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0));
+    const inrGeneralExp = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
+    const inrDeposited = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
+    const availableINR = Math.max(0, round2(inrIncome - inrGeneralExp - inrDeposited));
 
     const handleDeposit = async (e) => {
         e.preventDefault();
@@ -94,15 +90,15 @@ export default function DistributorsPage() {
                     { duration: 5000 }
                 );
             }
-            const newBal = (Number(editItem.inr_balance) || 0) + amt;
-            await dbService.updateAgent(editItem.$id, { inr_balance: safeFloat(newBal) });
+            const newBal = round2((Number(editItem.inr_balance) || 0) + amt);
+            await dbService.updateAgent(editItem.$id, { inr_balance: newBal });
 
             // Track as INR expense (deducts from undistributed pool)
             await dbService.createExpense({
                 title: `Deposit to ${editItem.name}`,
                 type: 'expense',
                 category: 'Distributor Deposit',
-                amount: safeFloat(amt),
+                amount: round2(amt),
                 currency: 'INR',
                 date: new Date().toISOString().split('T')[0],
                 notes: `Deposited ₹${amt.toLocaleString('en-IN')} to ${editItem.name}`
@@ -120,7 +116,7 @@ export default function DistributorsPage() {
         setSaving(true);
         try {
             const payload = { ...form };
-            payload.inr_balance = safeFloat(payload.inr_balance);
+            payload.inr_balance = round2(payload.inr_balance || 0);
             if (editItem) {
                 await dbService.updateAgent(editItem.$id, payload);
                 toast.success('Distributor Updated');

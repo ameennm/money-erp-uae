@@ -3,7 +3,7 @@ import { dbService } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Download, Search, FileSpreadsheet, Filter } from 'lucide-react';
+import { Download, Search, FileSpreadsheet, Filter, MessageCircle } from 'lucide-react';
 import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import * as XLSX from 'xlsx';
 
@@ -188,6 +188,28 @@ export default function ReportsPage() {
         toast.success(`Downloaded ledger with ${filtered.length} entries`);
     };
 
+    const shareOnWhatsApp = () => {
+        const lines = [
+            `📊 *MoneyFlow Ledger Report*`,
+            `Period: ${dateRange}`,
+            `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
+            `─────────────────────`,
+            `*Currency Summary:*`,
+            ...['SAR', 'AED', 'INR']
+                .filter(cur => totals[cur].credit > 0 || totals[cur].debit > 0)
+                .map(cur => `${cur}: Credit ${fmt(totals[cur].credit)} | Debit ${fmt(totals[cur].debit)} | Balance ${fmt(totals[cur].balance)}`),
+            `─────────────────────`,
+            `*Recent Entries (${Math.min(filtered.length, 20)} of ${filtered.length}):*`,
+            ...filtered.slice(0, 20).map((r, i) =>
+                `${i + 1}. ${r._date ? format(new Date(r._date), 'dd MMM') : '—'} | ${r.particular} | ${r.currency} ${r.credit > 0 ? '+' + fmt(r.credit) : '-' + fmt(r.debit)}`
+            ),
+            ``,
+            `_MoneyFlow ERP_`,
+        ];
+        const text = encodeURIComponent(lines.join('\n'));
+        window.open(`https://wa.me/?text=${text}`, '_blank');
+    };
+
     const typeBadge = (type) => {
         if (type === 'transaction') return <span className="badge badge-completed" style={{ fontSize: 10, padding: '2px 8px' }}>TXN</span>;
         if (type === 'income') return <span className="badge" style={{ background: 'rgba(0,200,150,0.15)', color: 'var(--brand-accent)', fontSize: 10, padding: '2px 8px' }}>CR</span>;
@@ -289,6 +311,14 @@ export default function ReportsPage() {
                     </div>
                     <button className="btn btn-outline" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
                         <Download size={16} /> Excel
+                    </button>
+                    <button
+                        className="btn btn-sm"
+                        style={{ background: '#25D366', color: '#fff', border: 'none', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={shareOnWhatsApp}
+                        title="Share on WhatsApp"
+                    >
+                        <MessageCircle size={15} /> WhatsApp
                     </button>
                 </div>
             </div>

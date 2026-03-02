@@ -34,8 +34,6 @@ export default function ExpensesPage() {
 
     useEffect(() => { fetch(); }, []);
 
-    const totalExpense = expenses.filter(e => e.type !== 'income').reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
-    const totalIncome = expenses.filter(e => e.type === 'income').reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
     const expenseSAR = expenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const expenseAED = expenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const expenseINR = expenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
@@ -77,27 +75,40 @@ export default function ExpensesPage() {
         <Layout title="Income & Ops">
             {/* Summary */}
             <div className="stats-grid mb-6">
-                <div className="stat-card" style={{ '--accent-bar': 'var(--status-failed)' }}>
-                    <div className="stat-icon" style={{ '--icon-bg': 'rgba(255,84,112,0.15)', '--icon-color': 'var(--status-failed)' }}>
-                        <TrendingDown size={20} />
-                    </div>
-                    <div className="stat-value">{totalExpense.toLocaleString()}</div>
-                    <div className="stat-label">Total Expenses</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>SAR {expenseSAR.toLocaleString()} | AED {expenseAED.toLocaleString()} | INR {expenseINR.toLocaleString()}</div>
-                </div>
+                {/* Income by currency */}
                 <div className="stat-card" style={{ '--accent-bar': 'var(--brand-accent)' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(0,200,150,0.15)', '--icon-color': 'var(--brand-accent)' }}>
                         <TrendingUp size={20} />
                     </div>
-                    <div className="stat-value">{totalIncome.toLocaleString()}</div>
-                    <div className="stat-label">Total Income</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>SAR {incomeSAR.toLocaleString()} | AED {incomeAED.toLocaleString()} | INR {incomeINR.toLocaleString()}</div>
+                    <div className="stat-label" style={{ marginBottom: 8 }}>Total Income</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {incomeSAR > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#4a9eff' }}>{incomeSAR.toLocaleString()} <span style={{ fontSize: 11, opacity: 0.7 }}>SAR</span></div>}
+                        {incomeAED > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--brand-gold)' }}>{incomeAED.toLocaleString()} <span style={{ fontSize: 11, opacity: 0.7 }}>AED</span></div>}
+                        {incomeINR > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--brand-accent)' }}>₹{incomeINR.toLocaleString('en-IN')} <span style={{ fontSize: 11, opacity: 0.7 }}>INR</span></div>}
+                        {incomeSAR === 0 && incomeAED === 0 && incomeINR === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No income recorded</div>}
+                    </div>
                 </div>
+
+                {/* Expenses by currency */}
+                <div className="stat-card" style={{ '--accent-bar': 'var(--status-failed)' }}>
+                    <div className="stat-icon" style={{ '--icon-bg': 'rgba(255,84,112,0.15)', '--icon-color': 'var(--status-failed)' }}>
+                        <TrendingDown size={20} />
+                    </div>
+                    <div className="stat-label" style={{ marginBottom: 8 }}>Total Expenses</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {expenseSAR > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#4a9eff' }}>{expenseSAR.toLocaleString()} <span style={{ fontSize: 11, opacity: 0.7 }}>SAR</span></div>}
+                        {expenseAED > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--brand-gold)' }}>{expenseAED.toLocaleString()} <span style={{ fontSize: 11, opacity: 0.7 }}>AED</span></div>}
+                        {expenseINR > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--status-failed)' }}>₹{expenseINR.toLocaleString('en-IN')} <span style={{ fontSize: 11, opacity: 0.7 }}>INR</span></div>}
+                        {expenseSAR === 0 && expenseAED === 0 && expenseINR === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No expenses recorded</div>}
+                    </div>
+                </div>
+
+                {/* Record count */}
                 <div className="stat-card" style={{ '--accent-bar': '#4a9eff' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(74,158,255,0.15)', '--icon-color': '#4a9eff' }}>
                         <TrendingUp size={20} />
                     </div>
-                    <div className="stat-value">{expenses.length}</div>
+                    <div style={{ fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800 }}>{expenses.length}</div>
                     <div className="stat-label">Total Records</div>
                 </div>
             </div>
