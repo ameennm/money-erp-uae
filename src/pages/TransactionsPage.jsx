@@ -178,7 +178,7 @@ export default function TransactionsPage() {
                 if (minRate > 0 && collRate < minRate) {
                     setSaving(false);
                     return toast.error(
-                        `Rate too low! Minimum ${currency} rate is ${minRate} per 1000 INR. You entered ${collRate}.`,
+                        `This amount can't be entered. Please check the rate and try again.`,
                         { duration: 5000 }
                     );
                 }
@@ -463,7 +463,7 @@ export default function TransactionsPage() {
                                     <td>{statusBadge(tx.status)}</td>
                                     <td>
                                         <div className="flex gap-2">
-                                            {isAdmin && (
+                                            {isCollector && (
                                                 <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
                                             )}
                                             <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
@@ -533,14 +533,9 @@ export default function TransactionsPage() {
                                     <div className="form-group">
                                         <label className="form-label">
                                             Collection Rate (per 1000 INR)
-                                            {minRateForCurrency > 0 && !editTx && (
-                                                <span style={{ marginLeft: 6, fontSize: 11, color: '#f5a623', fontWeight: 700 }}>
-                                                    — Min: {minRateForCurrency}
-                                                </span>
-                                            )}
                                         </label>
                                         <input className="form-input" type="number" step="0.01" required value={form.collection_rate}
-                                            placeholder={minRateForCurrency > 0 ? `Min ${minRateForCurrency}` : 'e.g. 39.9'}
+                                            placeholder="Enter rate"
                                             style={{
                                                 borderColor: !editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency
                                                     ? 'var(--status-failed)' : undefined
@@ -553,7 +548,7 @@ export default function TransactionsPage() {
                                             }} />
                                         {!editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency && (
                                             <div style={{ fontSize: 11, color: 'var(--status-failed)', marginTop: 4 }}>
-                                                ⚠️ Rate is below minimum ({minRateForCurrency}) — transaction will be blocked
+                                                ⚠️ This amount can't be entered
                                             </div>
                                         )}
                                     </div>

@@ -407,6 +407,7 @@ export default function AgentsPage() {
                                                 <th style={{ width: 40 }}>#</th>
                                                 <th>Date</th>
                                                 <th>Ref/Client</th>
+                                                <th>Distributor</th>
                                                 <th style={{ textAlign: 'right' }}>Collected</th>
                                                 <th style={{ textAlign: 'right' }}>Running Bal</th>
                                                 <th>Status</th>
@@ -414,7 +415,7 @@ export default function AgentsPage() {
                                         </thead>
                                         <tbody>
                                             {filteredTxs.length === 0 ? (
-                                                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
+                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
                                             ) : (
                                                 filteredTxs.map((t, idx) => (
                                                     <tr key={t.$id}>
@@ -423,6 +424,9 @@ export default function AgentsPage() {
                                                         <td style={{ fontWeight: 500 }}>
                                                             <span style={{ color: 'var(--brand-accent)', fontSize: 11, marginRight: 6 }}>#{t.tx_id}</span>
                                                             <br />{t.client_name}
+                                                        </td>
+                                                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                                            {t.distributor_name || '—'}
                                                         </td>
                                                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
                                                             {Number(t.collected_amount).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>

@@ -251,6 +251,7 @@ export default function DistributorsPage() {
                     amount: -Number(t.actual_inr_distributed),
                     ref: '#' + t.tx_id,
                     details: t.client_name,
+                    agent: t.collection_agent_name || '—',
                     status: t.status
                 }));
 
@@ -363,6 +364,7 @@ export default function DistributorsPage() {
                                                 <th style={{ width: 40 }}>#</th>
                                                 <th>Date</th>
                                                 <th>Reference/Client</th>
+                                                <th>Agent</th>
                                                 <th style={{ textAlign: 'center' }}>Event</th>
                                                 <th style={{ textAlign: 'right' }}>Credit (Deposit)</th>
                                                 <th style={{ textAlign: 'right' }}>Debit (Payout)</th>
@@ -371,7 +373,7 @@ export default function DistributorsPage() {
                                         </thead>
                                         <tbody>
                                             {filteredEvents.length === 0 ? (
-                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
+                                                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
                                             ) : (
                                                 filteredEvents.map((ev, idx) => (
                                                     <tr key={ev.$id || idx}>
@@ -382,6 +384,9 @@ export default function DistributorsPage() {
                                                         <td style={{ fontWeight: 500 }}>
                                                             <span style={{ color: 'var(--brand-accent)', fontSize: 11, marginRight: 6 }}>{ev.ref}</span>
                                                             <br />{ev.details}
+                                                        </td>
+                                                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                                            {ev.agent || '—'}
                                                         </td>
                                                         <td style={{ textAlign: 'center' }}>
                                                             <span className={`badge badge-${ev.status === 'completed' ? 'completed' : 'pending'}`} style={{ fontSize: 10 }}>
