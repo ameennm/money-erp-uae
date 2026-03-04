@@ -378,32 +378,36 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* Total Profit SAR */}
-                        <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.3)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(74,158,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a9eff', flexShrink: 0 }}>
-                                    <PiggyBank size={20} />
-                                </div>
-                                <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (SAR)</div>
-                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{round2(totalProfitSAR).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>SAR</span></div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from SAR collections</div>
-                                </div>
-                            </div>
-                        </div>
-                        {/* Total Profit AED */}
-                        <div className="card" style={{ padding: 20, border: '1px solid rgba(245,166,35,0.3)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245,166,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-gold)', flexShrink: 0 }}>
-                                    <PiggyBank size={20} />
-                                </div>
-                                <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (AED)</div>
-                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{round2(totalProfitAED).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>AED</span></div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from AED collections</div>
+                        {/* Total Profit SAR — admin only */}
+                        {isAdmin && (
+                            <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.3)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(74,158,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a9eff', flexShrink: 0 }}>
+                                        <PiggyBank size={20} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (SAR)</div>
+                                        <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{round2(totalProfitSAR).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>SAR</span></div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from SAR collections</div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
+                        {/* Total Profit AED — admin only */}
+                        {isAdmin && (
+                            <div className="card" style={{ padding: 20, border: '1px solid rgba(245,166,35,0.3)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245,166,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-gold)', flexShrink: 0 }}>
+                                        <PiggyBank size={20} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (AED)</div>
+                                        <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{round2(totalProfitAED).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>AED</span></div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from AED collections</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </>
             )}

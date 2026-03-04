@@ -460,7 +460,7 @@ export default function TransactionsPage() {
                                 <th>Requested</th>
                                 <th>Collected</th>
                                 <th>Agent</th>
-                                <th>Profit</th>
+                                {isAdmin && <th>Profit</th>}
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -483,9 +483,11 @@ export default function TransactionsPage() {
                                             {tx.collected_amount?.toLocaleString()} {tx.collected_currency}
                                         </td>
                                         <td>{tx.collection_agent_name || '—'}</td>
-                                        <td style={{ color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
-                                            {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')} ${profitCur}` : '—'}
-                                        </td>
+                                        {isAdmin && (
+                                            <td style={{ color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
+                                                {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')} ${profitCur}` : '—'}
+                                            </td>
+                                        )}
                                         <td>{statusBadge(tx.status)}</td>
                                         <td>
                                             <div className="flex gap-2">
@@ -591,8 +593,8 @@ export default function TransactionsPage() {
                                     </div>
                                 </div>
 
-                                {/* Profit Preview */}
-                                {!editTx && previewProfit > 0 && (
+                                {/* Profit Preview — admin only */}
+                                {isAdmin && !editTx && previewProfit > 0 && (
                                     <div style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
                                         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                                             📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>{previewProfit.toLocaleString('en-IN')} {form.collected_currency}</strong>
