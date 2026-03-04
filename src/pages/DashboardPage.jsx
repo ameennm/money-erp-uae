@@ -204,15 +204,17 @@ export default function DashboardPage() {
 
     // INR Balance = total INR received (deposits) minus general expenses minus INR already paid out to clients
     const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    // totalINRDistributed must be computed before balanceINR so we can use it here
     const totalINRDistributed = sumF(completed, 'actual_inr_distributed');
-    const balanceINR = Math.max(0, round2(incByCur('INR') - inrGeneralExpenses - totalINRDistributed));
 
     // INR deposited to distributors
     const inrDepositedToDistributors = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
-    // INR Not Given to Distributor = INR Balance - what's already deposited to distributors
-    const inrNotGiven = Math.max(0, round2(balanceINR - inrDepositedToDistributors));
+    // INR Not Given to Distributor = all INR received - sent to clients - deposited to distributors - other expenses
+    const totalINRIn = incByCur('INR'); // includes AED→INR conversion income
+    const inrNotGiven = Math.max(0, round2(totalINRIn - totalINRDistributed - inrDepositedToDistributors - inrGeneralExpenses));
+
+    // INR Balance = all INR in system (not yet spent anywhere)
+    const balanceINR = Math.max(0, round2(totalINRIn - inrGeneralExpenses - totalINRDistributed));
 
     // (totalINRDistributed already declared above)
 
@@ -336,12 +338,12 @@ export default function DashboardPage() {
                         </div>
                         {/* INR Not Given to Distributor */}
                         <div className="card" style={{ padding: 20, border: '1px solid rgba(255,170,50,0.25)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                                 <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(255,170,50,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffaa32', flexShrink: 0 }}>
                                     <Banknote size={20} />
                                 </div>
-                                <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>INR Not Given to Distributor</div>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2, whiteSpace: 'nowrap' }}>INR Not Given to Distributor</div>
                                     <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#ffaa32', lineHeight: 1 }}>₹{inrNotGiven.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>pending deposit to distributors</div>
                                 </div>
