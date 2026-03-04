@@ -68,7 +68,7 @@ export default function DashboardPage() {
         conversion_agent_id: '',
         conversion_agent_name: ''
     });
-    const [inrForm, setInrForm] = useState({ aed_amount: '', aed_to_inr_rate: '' });
+    const [inrForm, setInrForm] = useState({ aed_amount: '', aed_to_inr_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
 
     // Date range
     const [dateRange, setDateRange] = useState('All Time');
@@ -134,6 +134,7 @@ export default function DashboardPage() {
 
     const handleAedToInrConvert = async (e) => {
         e.preventDefault();
+        if (!inrForm.conversion_agent_id) return toast.error('Select a conversion agent');
         const aedAmt = parseFloat(inrForm.aed_amount);
         if (isNaN(aedAmt) || aedAmt <= 0) return toast.error('Enter a valid AED amount');
         const rate = parseFloat(inrForm.aed_to_inr_rate);
@@ -145,13 +146,13 @@ export default function DashboardPage() {
 
             // Create AED expense (money leaving AED pool)
             await dbService.createExpense({
-                title: 'AED→INR Conversion',
+                title: `AED→INR Conversion via ${inrForm.conversion_agent_name}`,
                 type: 'expense',
                 category: 'AED→INR Conversion',
                 amount: safeFloat(aedAmt),
                 currency: 'AED',
                 date: new Date().toISOString().split('T')[0],
-                notes: `Converted ${aedAmt} AED at rate ${rate}`
+                notes: `Agent: ${inrForm.conversion_agent_name} | Converted ${aedAmt} AED at rate ${rate}`
             });
 
             // Create INR income (money entering INR undistributed pool)
@@ -165,9 +166,9 @@ export default function DashboardPage() {
                 notes: `Received ₹${inrAmount.toLocaleString('en-IN')} from ${aedAmt} AED at rate ${rate}`
             });
 
-            toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')}`);
+            toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')} via ${inrForm.conversion_agent_name}`);
             setInrConvertModal(false);
-            setInrForm({ aed_amount: '', aed_to_inr_rate: '' });
+            setInrForm({ aed_amount: '', aed_to_inr_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
             fetchAll();
         } catch (error) {
             toast.error('Conversion failed: ' + error.message);
@@ -215,8 +216,9 @@ export default function DashboardPage() {
 
     // (totalINRDistributed already declared above)
 
-    // Total Profit INR = sum of profit_inr across all filtered txs
-    const totalProfitInr = sumF(fTxs, 'profit_inr');
+    // Total Profit split by currency: profit_inr field stores SAR or AED profit based on collected_currency
+    const totalProfitSAR = fTxs.filter(t => (t.collected_currency || 'SAR') === 'SAR').reduce((a, t) => a + (Number(t.profit_inr) || 0), 0);
+    const totalProfitAED = fTxs.filter(t => t.collected_currency === 'AED').reduce((a, t) => a + (Number(t.profit_inr) || 0), 0);
 
     // Agents owed SAR/AED (from their balance fields)
     const collectionAgents = agents.filter(a => a.type && a.type.startsWith('collection'));
@@ -374,16 +376,29 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* Total Profit INR */}
-                        <div className="card" style={{ padding: 20, border: '1px solid rgba(0,200,150,0.3)' }}>
+                        {/* Total Profit SAR */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(74,158,255,0.3)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(0,200,150,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-accent)', flexShrink: 0 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(74,158,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a9eff', flexShrink: 0 }}>
                                     <PiggyBank size={20} />
                                 </div>
                                 <div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit</div>
-                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-accent)', lineHeight: 1 }}>₹{totalProfitInr.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Total INR Transferred: <strong style={{ color: 'var(--text-secondary)' }}>₹{totalINRDistributed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (SAR)</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: '#4a9eff', lineHeight: 1 }}>{round2(totalProfitSAR).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>SAR</span></div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from SAR collections</div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* Total Profit AED */}
+                        <div className="card" style={{ padding: 20, border: '1px solid rgba(245,166,35,0.3)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(245,166,35,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand-gold)', flexShrink: 0 }}>
+                                    <PiggyBank size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Total Profit (AED)</div>
+                                    <div style={{ fontSize: 'clamp(16px, 2.5vw, 24px)', fontWeight: 800, color: 'var(--brand-gold)', lineHeight: 1 }}>{round2(totalProfitAED).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>AED</span></div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>from AED collections</div>
                                 </div>
                             </div>
                         </div>
@@ -506,7 +521,7 @@ export default function DashboardPage() {
                                             setConvertForm({ ...convertForm, conversion_agent_id: ag?.$id || '', conversion_agent_name: ag?.name || '' });
                                         }}>
                                         <option value="">Select Agent...</option>
-                                        {agents.filter(a => a.type === 'conversion').map(a => (
+                                        {agents.filter(a => a.type === 'conversion_sar').map(a => (
                                             <option key={a.$id} value={a.$id}>{a.name}</option>
                                         ))}
                                     </select>
@@ -545,6 +560,20 @@ export default function DashboardPage() {
                                             {balanceAED.toLocaleString(undefined, { maximumFractionDigits: 2 })} AED
                                         </span>
                                     </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Conversion Agent (AED→INR) *</label>
+                                    <select className="form-select" required
+                                        value={inrForm.conversion_agent_id}
+                                        onChange={e => {
+                                            const ag = agents.find(a => a.$id === e.target.value);
+                                            setInrForm({ ...inrForm, conversion_agent_id: ag?.$id || '', conversion_agent_name: ag?.name || '' });
+                                        }}>
+                                        <option value="">Select Agent...</option>
+                                        {agents.filter(a => a.type === 'conversion_aed').map(a => (
+                                            <option key={a.$id} value={a.$id}>{a.name}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Amount (AED) *</label>

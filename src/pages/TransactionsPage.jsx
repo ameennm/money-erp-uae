@@ -84,6 +84,7 @@ export default function TransactionsPage() {
     const { role, user } = useAuth();
     const isAdmin = role === 'admin';
     const isCollector = role === 'collector' || isAdmin;
+    const isCollectorOnly = role === 'collector';
 
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
@@ -163,8 +164,16 @@ export default function TransactionsPage() {
             });
 
             if (editTx) {
-                await dbService.updateTransaction(editTx.$id, payload);
-                toast.success('Updated');
+                // Collector edits require admin approval
+                if (isCollectorOnly) {
+                    payload.edit_pending_approval = true;
+                    await dbService.updateTransaction(editTx.$id, payload);
+                    toast.success('Edit submitted — awaiting admin approval');
+                } else {
+                    payload.edit_pending_approval = false;
+                    await dbService.updateTransaction(editTx.$id, payload);
+                    toast.success('Updated');
+                }
             } else {
                 if (!payload.distributor_id) {
                     setSaving(false);
@@ -230,6 +239,14 @@ export default function TransactionsPage() {
             fetchAll();
         } catch (e) { toast.error(e.message); }
         finally { setSaving(false); }
+    };
+
+    const handleApproveEdit = async (tx) => {
+        try {
+            await dbService.updateTransaction(tx.$id, { edit_pending_approval: false });
+            toast.success(`Edit approved for TX #${tx.tx_id}`);
+            fetchAll();
+        } catch (e) { toast.error('Approve failed: ' + e.message); }
     };
 
     const handleConversion = async (e) => {
@@ -318,6 +335,7 @@ export default function TransactionsPage() {
     };
 
     const handleDelete = async (tx) => {
+        if (!isAdmin) return toast.error('Only admins can delete transactions');
         if (!confirm(`Delete transaction #${tx.tx_id} for ${tx.client_name}? This cannot be undone.`)) return;
         try {
             // Reverse distributor balance if transaction was completed
@@ -442,37 +460,51 @@ export default function TransactionsPage() {
                                 <th>Requested</th>
                                 <th>Collected</th>
                                 <th>Agent</th>
-                                <th>Profit ₹</th>
+                                <th>Profit</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.map(tx => (
-                                <tr key={tx.$id}>
-                                    <td className="font-bold">#{tx.tx_id}</td>
-                                    <td>{tx.client_name}</td>
-                                    <td className="currency inr">₹{tx.inr_requested?.toLocaleString()}</td>
-                                    <td className={`currency ${tx.collected_currency?.toLowerCase()}`}>
-                                        {tx.collected_amount?.toLocaleString()} {tx.collected_currency}
-                                    </td>
-                                    <td>{tx.collection_agent_name || '—'}</td>
-                                    <td style={{ color: tx.profit_inr > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: tx.profit_inr > 0 ? 700 : 400 }}>
-                                        {tx.profit_inr > 0 ? `₹${Number(tx.profit_inr).toLocaleString('en-IN')}` : '—'}
-                                    </td>
-                                    <td>{statusBadge(tx.status)}</td>
-                                    <td>
-                                        <div className="flex gap-2">
-                                            {isCollector && (
-                                                <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
+                            {filtered.map(tx => {
+                                const profitCur = tx.collected_currency || 'SAR';
+                                const profitVal = Number(tx.profit_inr) || 0;
+                                return (
+                                    <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
+                                        <td className="font-bold">
+                                            #{tx.tx_id}
+                                            {tx.edit_pending_approval && (
+                                                <span style={{ marginLeft: 6, fontSize: 10, background: '#ffaa32', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>PENDING EDIT</span>
                                             )}
-                                            <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                                        </td>
+                                        <td>{tx.client_name}</td>
+                                        <td className="currency inr">₹{tx.inr_requested?.toLocaleString()}</td>
+                                        <td className={`currency ${tx.collected_currency?.toLowerCase()}`}>
+                                            {tx.collected_amount?.toLocaleString()} {tx.collected_currency}
+                                        </td>
+                                        <td>{tx.collection_agent_name || '—'}</td>
+                                        <td style={{ color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
+                                            {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')} ${profitCur}` : '—'}
+                                        </td>
+                                        <td>{statusBadge(tx.status)}</td>
+                                        <td>
+                                            <div className="flex gap-2">
+                                                {isCollector && (
+                                                    <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
+                                                )}
+                                                {isAdmin && tx.edit_pending_approval && (
+                                                    <button className="btn btn-sm" style={{ background: '#22c55e', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12 }} onClick={() => handleApproveEdit(tx)} title="Approve Edit">✓ Approve</button>
+                                                )}
+                                                {isAdmin && (
+                                                    <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -563,7 +595,7 @@ export default function TransactionsPage() {
                                 {!editTx && previewProfit > 0 && (
                                     <div style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
                                         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                                            📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>₹{previewProfit.toLocaleString('en-IN')}</strong>
+                                            📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>{previewProfit.toLocaleString('en-IN')} {form.collected_currency}</strong>
                                             <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
                                                 (rate spread: {parseFloat(form.collection_rate) - minRateForCurrency} × {form.inr_requested}/1000)
                                             </span>

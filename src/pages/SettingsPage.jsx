@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { dbService } from '../lib/appwrite';
+import { dbService, databases, APPWRITE_CONFIG, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Settings, Save, RefreshCw } from 'lucide-react';
+import { Settings, Save, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 
 export default function SettingsPage() {
     const { role } = useAuth();
@@ -13,6 +13,7 @@ export default function SettingsPage() {
     const [minAedRate, setMinAedRate] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [wiping, setWiping] = useState(false);
 
     const fetchSettings = async () => {
         setLoading(true);
@@ -44,6 +45,44 @@ export default function SettingsPage() {
             toast.error('Failed to save: ' + e.message);
         } finally {
             setSaving(false);
+        }
+    };
+
+    const wipeAllData = async () => {
+        const confirmed = window.prompt(
+            'DANGER: This will delete ALL transactions, expenses, conversion records, and reset all agent balances.\n\nType "WIPE" to confirm:'
+        );
+        if (confirmed !== 'WIPE') return toast.error('Aborted. You did not type WIPE.');
+        setWiping(true);
+        const DB = APPWRITE_CONFIG.databaseId;
+        const cols = ['transactions', 'aed_conversions', 'expenses', 'credits'];
+        try {
+            let totalDeleted = 0;
+            for (const col of cols) {
+                let count = 0;
+                while (true) {
+                    const res = await databases.listDocuments(DB, col, [Query.limit(100)]);
+                    if (res.documents.length === 0) break;
+                    await Promise.all(res.documents.map(doc => databases.deleteDocument(DB, col, doc.$id)));
+                    count += res.documents.length;
+                }
+                totalDeleted += count;
+            }
+            // Reset all agent/distributor balances
+            let agentDone = false;
+            while (!agentDone) {
+                const res = await databases.listDocuments(DB, 'agents', [Query.limit(100)]);
+                if (res.documents.length === 0) { agentDone = true; break; }
+                await Promise.all(res.documents.map(doc =>
+                    databases.updateDocument(DB, 'agents', doc.$id, { inr_balance: 0, sar_balance: 0, aed_balance: 0 })
+                ));
+                if (res.documents.length < 100) agentDone = true;
+            }
+            toast.success(`✅ Wiped ${totalDeleted} records. All balances reset to zero.`);
+        } catch (e) {
+            toast.error('Wipe failed: ' + e.message);
+        } finally {
+            setWiping(false);
         }
     };
 
@@ -166,6 +205,27 @@ export default function SettingsPage() {
                         </div>
                     </form>
                 )}
+
+                {/* Danger Zone */}
+                <div className="card" style={{ marginTop: 40, padding: 24, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <AlertTriangle size={18} color="#ef4444" />
+                        <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 15 }}>Danger Zone</span>
+                    </div>
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+                        Permanently deletes <strong>all transactions, expenses, AED conversions, and credits</strong>.
+                        Also resets all agent and distributor balances to zero. Use this only when starting fresh.
+                    </p>
+                    <button
+                        type="button"
+                        className="btn"
+                        style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 700 }}
+                        onClick={wipeAllData}
+                        disabled={wiping}
+                    >
+                        <Trash2 size={15} /> {wiping ? 'Wiping… please wait' : 'Wipe All Data'}
+                    </button>
+                </div>
             </div>
         </Layout>
     );

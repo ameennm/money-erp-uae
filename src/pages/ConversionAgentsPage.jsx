@@ -29,7 +29,21 @@ const applyDateRange = (arr, range, from, to) => {
     return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
 };
 
-const EMPTY = { name: '', phone: '', notes: '', type: 'conversion', currency: 'AED' };
+const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED' };
+
+const CONV_TYPES = [
+    { value: 'conversion_sar', label: 'SAR → AED', color: '#4a9eff', bg: 'rgba(74,158,255,0.15)' },
+    { value: 'conversion_aed', label: 'AED → INR', color: 'var(--brand-gold)', bg: 'rgba(245,166,35,0.15)' },
+];
+
+const convTypeBadge = (type) => {
+    const t = CONV_TYPES.find(c => c.value === type) || CONV_TYPES[0];
+    return (
+        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: t.bg, color: t.color }}>
+            {t.label}
+        </span>
+    );
+};
 
 export default function ConversionAgentsPage() {
     const [agents, setAgents] = useState([]);
@@ -48,7 +62,7 @@ export default function ConversionAgentsPage() {
         setLoading(true);
         try {
             const [ar, cr] = await Promise.all([
-                dbService.listAgents([Query.equal('type', 'conversion')]),
+                dbService.listAgents([Query.or([Query.equal('type', 'conversion_sar'), Query.equal('type', 'conversion_aed'), Query.equal('type', 'conversion')])]),
                 dbService.listAedConversions(),
             ]);
             setAgents(ar.documents);
@@ -70,7 +84,7 @@ export default function ConversionAgentsPage() {
     };
 
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
-    const openEdit = (a) => { setEditItem(a); setForm({ name: a.name || '', phone: a.phone || '', notes: a.notes || '', type: 'conversion', currency: 'AED' }); setModal(true); };
+    const openEdit = (a) => { setEditItem(a); setForm({ name: a.name || '', phone: a.phone || '', notes: a.notes || '', type: a.type || 'conversion_sar', currency: 'AED' }); setModal(true); };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -84,10 +98,19 @@ export default function ConversionAgentsPage() {
         finally { setSaving(false); }
     };
 
-    const handleDelete = async (id) => {
-        if (!window.confirm('Delete this conversion agent?')) return;
-        try { await dbService.deleteAgent(id); toast.success('Deleted'); fetchAll(); }
-        catch (e) { toast.error(e.message); }
+    const handleDelete = async (agent) => {
+        const agentRecs = convRecs.filter(r => r.conversion_agent_id === agent.$id);
+        const msg = agentRecs.length > 0
+            ? `Delete "${agent.name}"? This will also delete ${agentRecs.length} conversion record(s) from the dashboard. This cannot be undone.`
+            : `Delete conversion agent "${agent.name}"?`;
+        if (!window.confirm(msg)) return;
+        try {
+            // Delete all AED conversion records for this agent first
+            await Promise.all(agentRecs.map(r => dbService.deleteAedConversion(r.$id)));
+            await dbService.deleteAgent(agent.$id);
+            toast.success(`Deleted agent + ${agentRecs.length} conversion record(s)`);
+            fetchAll();
+        } catch (e) { toast.error(e.message); }
     };
 
     return (
@@ -131,8 +154,9 @@ export default function ConversionAgentsPage() {
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontWeight: 700, fontSize: 16 }}>{a.name}</div>
+                                        <div style={{ marginTop: 4 }}>{convTypeBadge(a.type)}</div>
                                         {a.phone && (
-                                            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                                            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
                                                 <Phone size={11} /> {a.phone}
                                             </div>
                                         )}
@@ -146,7 +170,7 @@ export default function ConversionAgentsPage() {
                                             <List size={13} />
                                         </button>
                                         <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
-                                        <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a.$id)}><Trash2 size={13} /></button>
+                                        <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
                                     </div>
                                 </div>
 
@@ -318,6 +342,26 @@ export default function ConversionAgentsPage() {
                         <form onSubmit={handleSave}>
                             <div className="modal-body">
                                 <div className="form-group">
+                                    <label className="form-label">Conversion Type *</label>
+                                    <div style={{ display: 'flex', gap: 10 }}>
+                                        {CONV_TYPES.map(ct => (
+                                            <label key={ct.value} style={{
+                                                flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+                                                border: `2px solid ${form.type === ct.value ? ct.color : 'var(--border-color)'}`,
+                                                borderRadius: 10, cursor: 'pointer',
+                                                background: form.type === ct.value ? ct.bg : 'transparent',
+                                                transition: 'all 0.15s'
+                                            }}>
+                                                <input type="radio" name="conv_type" value={ct.value}
+                                                    checked={form.type === ct.value}
+                                                    onChange={() => setForm({ ...form, type: ct.value })}
+                                                    style={{ accentColor: ct.color }} />
+                                                <span style={{ fontWeight: 700, color: ct.color, fontSize: 14 }}>{ct.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="form-group">
                                     <label className="form-label">Full Name *</label>
                                     <input id="ca-name" className="form-input" placeholder="Agent name"
                                         value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
@@ -341,8 +385,9 @@ export default function ConversionAgentsPage() {
                             </div>
                         </form>
                     </div>
-                </div>
-            )}
-        </Layout>
+                </div >
+            )
+            }
+        </Layout >
     );
 }

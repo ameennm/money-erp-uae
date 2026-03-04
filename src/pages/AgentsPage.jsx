@@ -379,11 +379,17 @@ export default function AgentsPage() {
                                 </div>
 
                                 {/* Summary Cards */}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Collections</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
                                             {filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
+                                        </div>
+                                    </div>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.12)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Collected (All Time)</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                            {allTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
                                         </div>
                                     </div>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>

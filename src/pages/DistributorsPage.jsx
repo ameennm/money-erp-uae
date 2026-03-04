@@ -342,7 +342,7 @@ export default function DistributorsPage() {
                                     )}
                                 </div>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Distributions (Count)</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
@@ -353,6 +353,12 @@ export default function DistributorsPage() {
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period INR Distributed</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: '#a78bfa' }}>
                                             ₹{Math.abs(periodDistributions.reduce((sum, t) => sum + t.amount, 0)).toLocaleString('en-IN')}
+                                        </div>
+                                    </div>
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.15)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Deposited to Him</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                            ₹{filteredEvents.filter(e => e.type === 'deposit').reduce((sum, e) => sum + e.amount, 0).toLocaleString('en-IN')}
                                         </div>
                                     </div>
                                 </div>

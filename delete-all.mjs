@@ -8,45 +8,47 @@ const client = new Client()
 const databases = new Databases(client);
 const DB_ID = 'money_erp_db';
 
-const COLLECTIONS = ['transactions', 'aed_conversions', 'expenses'];
+// All collections whose documents should be fully deleted
+const COLLECTIONS_TO_DELETE = ['transactions', 'aed_conversions', 'expenses', 'credits'];
 
-async function deleteAll() {
+async function deleteAllInCollection(col) {
+    let count = 0;
+    while (true) {
+        const res = await databases.listDocuments(DB_ID, col, [Query.limit(100)]);
+        if (res.documents.length === 0) break;
+        await Promise.all(res.documents.map(doc => databases.deleteDocument(DB_ID, col, doc.$id)));
+        count += res.documents.length;
+    }
+    console.log(`✅ Deleted ${count} records from [${col}]`);
+}
+
+async function wipeAll() {
     try {
-        for (const col of COLLECTIONS) {
-            let count = 0;
-            while (true) {
-                const res = await databases.listDocuments(DB_ID, col);
-                if (res.documents.length === 0) break;
-                for (let doc of res.documents) {
-                    await databases.deleteDocument(DB_ID, col, doc.$id);
-                    count++;
-                }
-            }
-            console.log(`✅ Deleted ${count} records from ${col}`);
+        // 1. Delete all records in specified collections
+        for (const col of COLLECTIONS_TO_DELETE) {
+            await deleteAllInCollection(col);
         }
 
-        // Reset all agent and distributor balances to 0 instead of deleting them
-        console.log('🔄 Resetting agent/distributor balances...');
+        // 2. Reset all agent/distributor balances to 0
+        console.log('🔄 Resetting all agent/distributor balances to 0...');
         let agentCount = 0;
-        let agentCursor = null;
         while (true) {
-            const queries = agentCursor ? [Query.cursorAfter(agentCursor)] : [];
-            const res = await databases.listDocuments(DB_ID, 'agents', queries);
+            const res = await databases.listDocuments(DB_ID, 'agents', [Query.limit(100)]);
             if (res.documents.length === 0) break;
-
-            for (let doc of res.documents) {
-                await databases.updateDocument(DB_ID, 'agents', doc.$id, {
-                    inr_balance: 0
-                });
-                agentCount++;
-                agentCursor = doc.$id;
-            }
+            await Promise.all(res.documents.map(doc =>
+                databases.updateDocument(DB_ID, 'agents', doc.$id, {
+                    inr_balance: 0,
+                    sar_balance: 0,
+                    aed_balance: 0,
+                })
+            ));
+            agentCount += res.documents.length;
         }
-        console.log(`✅ Reset balances for ${agentCount} agents/distributors`);
-        console.log('🧹 All data wiped clean!');
+        console.log(`✅ Reset balances for ${agentCount} agent(s)/distributor(s)`);
+        console.log('🧹 Database wiped clean! All balances are zero.');
     } catch (e) {
         console.error('❌ Failed:', e.message);
     }
 }
-deleteAll();
 
+wipeAll();
