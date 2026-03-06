@@ -1,100 +1,138 @@
-import { Client, Account, Databases, ID, Query } from 'appwrite';
+// ─── Cloudflare Workers API Wrapper ───────────────────────────────────────────
+const API_BASE = '/api';
 
-// ─── Appwrite Configuration ───────────────────────────────────────────────────
-export const APPWRITE_CONFIG = {
-    endpoint: 'https://sgp.cloud.appwrite.io/v1',
-    projectId: '6999fff50036fef7a425',
-    databaseId: 'money_erp_db',
-    collections: {
-        transactions: 'transactions',
-        agents: 'agents',
-        employees: 'employees',
-        expenses: 'expenses',
-        credits: 'credits',
-        aed_conversions: 'aed_conversions',
-        settings: 'settings',
-    },
+const fetchApi = async (path, options = {}) => {
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers,
+        },
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `API Error: ${res.statusText}`);
+    }
+    return res.json();
 };
 
-export const client = new Client()
-    .setEndpoint(APPWRITE_CONFIG.endpoint)
-    .setProject(APPWRITE_CONFIG.projectId);
+export const Query = {
+    equal: (key, val) => ({ type: 'equal', key, val }),
+    orderDesc: (key) => ({ type: 'orderDesc', key }),
+    limit: (val) => ({ type: 'limit', val }),
+};
 
-client.ping().then(() => {
-    console.log('%c✅ Appwrite connection verified', 'color:#00c896;font-weight:bold');
-}).catch((err) => {
-    console.warn('⚠️ Appwrite ping failed:', err.message);
-});
-
-export const account = new Account(client);
-export const databases = new Databases(client);
+export const ID = {
+    unique: () => crypto.randomUUID()
+};
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authService = {
-    async login(email, password) { return account.createEmailPasswordSession(email, password); },
-    async logout() { return account.deleteSession('current'); },
-    async getCurrentUser() { try { return await account.get(); } catch { return null; } },
-    async createEmployee(email, password, name) { return account.create(ID.unique(), email, password, name); },
+    async login(email, password) {
+        const data = await fetchApi('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password })
+        });
+        localStorage.setItem('currentUser', JSON.stringify(data.user));
+        return data.user;
+    },
+    async logout() {
+        localStorage.removeItem('currentUser');
+    },
+    async getCurrentUser() {
+        try {
+            const userStr = localStorage.getItem('currentUser');
+            if (userStr) return JSON.parse(userStr);
+            return null;
+        } catch {
+            return null;
+        }
+    },
+    async createEmployee(email, password, name) {
+        // Technically mapped to dbService.createEmployee
+        const res = await dbService.createEmployee({ email, password, name, role: 'collector', notes: '' });
+        return res;
+    },
 };
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
-const DB = APPWRITE_CONFIG.databaseId;
-const COL = APPWRITE_CONFIG.collections;
-
-const SETTINGS_DOC_ID = 'global_settings';
+const applyQueries = (data, queries = []) => {
+    let filtered = [...data];
+    for (const q of queries) {
+        if (q.type === 'equal') {
+            filtered = filtered.filter(item => item[q.key] === q.val);
+        } else if (q.type === 'orderDesc') {
+            filtered.sort((a, b) => new Date(b[q.key] || 0) - new Date(a[q.key] || 0));
+        } else if (q.type === 'limit') {
+            filtered = filtered.slice(0, q.val);
+        }
+    }
+    return { documents: filtered, total: filtered.length };
+};
 
 export const dbService = {
     // Transactions
-    async createTransaction(data) { return databases.createDocument(DB, COL.transactions, ID.unique(), data); },
-    async listTransactions(q = []) { return databases.listDocuments(DB, COL.transactions, [Query.orderDesc('$createdAt'), Query.limit(500), ...q]); },
-    async getTransaction(id) { return databases.getDocument(DB, COL.transactions, id); },
-    async updateTransaction(id, data) { return databases.updateDocument(DB, COL.transactions, id, data); },
-    async deleteTransaction(id) { return databases.deleteDocument(DB, COL.transactions, id); },
+    async createTransaction(data) { return fetchApi('/transactions', { method: 'POST', body: JSON.stringify(data) }); },
+    async listTransactions(q = []) {
+        const data = await fetchApi('/transactions');
+        return applyQueries(data, q);
+    },
+    async getTransaction(id) { return fetchApi(`/transactions/${id}`); },
+    async updateTransaction(id, data) { return fetchApi(`/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async deleteTransaction(id) { return fetchApi(`/transactions/${id}`, { method: 'DELETE' }); },
 
     // Collection Agents
-    async listAgents(q = []) { return databases.listDocuments(DB, COL.agents, q); },
-    async createAgent(data) { return databases.createDocument(DB, COL.agents, ID.unique(), data); },
-    async updateAgent(id, data) { return databases.updateDocument(DB, COL.agents, id, data); },
-    async deleteAgent(id) { return databases.deleteDocument(DB, COL.agents, id); },
+    async listAgents(q = []) {
+        const data = await fetchApi('/agents');
+        return applyQueries(data, q);
+    },
+    async createAgent(data) { return fetchApi('/agents', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateAgent(id, data) { return fetchApi(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async deleteAgent(id) { return fetchApi(`/agents/${id}`, { method: 'DELETE' }); },
 
     // Employees
-    async listEmployees(q = []) { return databases.listDocuments(DB, COL.employees, q); },
-    async createEmployee(data) { return databases.createDocument(DB, COL.employees, ID.unique(), data); },
-    async updateEmployee(id, data) { return databases.updateDocument(DB, COL.employees, id, data); },
-    async deleteEmployee(id) { return databases.deleteDocument(DB, COL.employees, id); },
+    async listEmployees(q = []) {
+        const data = await fetchApi('/employees');
+        return applyQueries(data, q);
+    },
+    async createEmployee(data) { return fetchApi('/employees', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateEmployee(id, data) { return fetchApi(`/employees/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async deleteEmployee(id) { return fetchApi(`/employees/${id}`, { method: 'DELETE' }); },
 
     // Expenses
-    async listExpenses(q = []) { return databases.listDocuments(DB, COL.expenses, [Query.orderDesc('$createdAt'), ...q]); },
-    async createExpense(data) { return databases.createDocument(DB, COL.expenses, ID.unique(), data); },
-    async deleteExpense(id) { return databases.deleteDocument(DB, COL.expenses, id); },
+    async listExpenses(q = []) {
+        const data = await fetchApi('/expenses');
+        return applyQueries(data, q);
+    },
+    async createExpense(data) { return fetchApi('/expenses', { method: 'POST', body: JSON.stringify(data) }); },
+    async deleteExpense(id) { return fetchApi(`/expenses/${id}`, { method: 'DELETE' }); },
 
     // Credits
-    async listCredits(q = []) { return databases.listDocuments(DB, COL.credits, [Query.orderDesc('$createdAt'), Query.limit(500), ...q]); },
-    async createCredit(data) { return databases.createDocument(DB, COL.credits, ID.unique(), data); },
-    async updateCredit(id, data) { return databases.updateDocument(DB, COL.credits, id, data); },
-    async deleteCredit(id) { return databases.deleteDocument(DB, COL.credits, id); },
+    async listCredits(q = []) {
+        const data = await fetchApi('/credits');
+        return applyQueries(data, q);
+    },
+    async createCredit(data) { return fetchApi('/credits', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateCredit(id, data) { return fetchApi(`/credits/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async deleteCredit(id) { return fetchApi(`/credits/${id}`, { method: 'DELETE' }); },
 
     // AED Conversions
-    async listAedConversions(q = []) { return databases.listDocuments(DB, COL.aed_conversions, [Query.orderDesc('$createdAt'), Query.limit(200), ...q]); },
-    async createAedConversion(data) { return databases.createDocument(DB, COL.aed_conversions, ID.unique(), data); },
-    async deleteAedConversion(id) { return databases.deleteDocument(DB, COL.aed_conversions, id); },
+    async listAedConversions(q = []) {
+        const data = await fetchApi('/aed_conversions');
+        return applyQueries(data, q);
+    },
+    async createAedConversion(data) { return fetchApi('/aed_conversions', { method: 'POST', body: JSON.stringify(data) }); },
+    async deleteAedConversion(id) { return fetchApi(`/aed_conversions/${id}`, { method: 'DELETE' }); },
 
     // Settings (single global doc)
     async getSettings() {
         try {
-            return await databases.getDocument(DB, COL.settings, SETTINGS_DOC_ID);
+            return await fetchApi('/settings');
         } catch {
-            // Document doesn't exist yet — return defaults
             return { min_sar_rate: 0, min_aed_rate: 0 };
         }
     },
     async upsertSettings(data) {
-        try {
-            return await databases.updateDocument(DB, COL.settings, SETTINGS_DOC_ID, data);
-        } catch {
-            return await databases.createDocument(DB, COL.settings, SETTINGS_DOC_ID, data);
-        }
+        return fetchApi('/settings', { method: 'PUT', body: JSON.stringify(data) });
     },
 };
-
-export { Query, ID };

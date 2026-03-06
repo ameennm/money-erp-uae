@@ -5,15 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "wrangler pages dev --remote --port 8788 -- npx vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "appwrite": "^22.4.0",
     "date-fns": "^4.1.0",
+    "hono": "^4.12.5",
     "lucide-react": "^0.575.0",
-    "node-appwrite": "^22.1.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
@@ -30,6 +30,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "wrangler": "^4.71.0"
   }
 }

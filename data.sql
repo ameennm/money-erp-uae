@@ -1,0 +1,2 @@
+INSERT INTO employees (id, createdAt, updatedAt, name, email, role, notes) VALUES ('699ca51400165e20b68a', '2026-02-23T19:05:56.276+00:00', '2026-02-23T19:05:56.276+00:00', 'HISHAM', 'AMMM@GMAIL.COM', 'collector', '');
+INSERT INTO settings (id, createdAt, updatedAt, min_sar_rate, min_aed_rate) VALUES ('global_settings', '2026-03-02T18:26:05.594+00:00', '2026-03-04T09:24:09.442+00:00', 41.2, 39.5);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dbService, databases, APPWRITE_CONFIG, Query } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -54,29 +54,34 @@ export default function SettingsPage() {
         );
         if (confirmed !== 'WIPE') return toast.error('Aborted. You did not type WIPE.');
         setWiping(true);
-        const DB = APPWRITE_CONFIG.databaseId;
         const cols = ['transactions', 'aed_conversions', 'expenses', 'credits'];
         try {
             let totalDeleted = 0;
+            // Using existing API routes to fetch and delete
             for (const col of cols) {
                 let count = 0;
                 while (true) {
-                    const res = await databases.listDocuments(DB, col, [Query.limit(100)]);
-                    if (res.documents.length === 0) break;
-                    await Promise.all(res.documents.map(doc => databases.deleteDocument(DB, col, doc.$id)));
-                    count += res.documents.length;
+                    const res = await fetch(`/api/${col}`).then(r => r.json());
+                    if (!res || res.length === 0) break;
+                    await Promise.all(res.map(doc => fetch(`/api/${col}/${doc.$id}`, { method: 'DELETE' })));
+                    count += res.length;
                 }
                 totalDeleted += count;
             }
             // Reset all agent/distributor balances
             let agentDone = false;
             while (!agentDone) {
-                const res = await databases.listDocuments(DB, 'agents', [Query.limit(100)]);
-                if (res.documents.length === 0) { agentDone = true; break; }
-                await Promise.all(res.documents.map(doc =>
-                    databases.updateDocument(DB, 'agents', doc.$id, { inr_balance: 0, sar_balance: 0, aed_balance: 0 })
+                const res = await fetch(`/api/agents`).then(r => r.json());
+                if (!res || res.length === 0) { agentDone = true; break; }
+                const toUpdate = res.filter(a => a.inr_balance > 0 || a.sar_balance > 0 || a.aed_balance > 0);
+                if (toUpdate.length === 0) { agentDone = true; break; }
+                await Promise.all(toUpdate.map(doc =>
+                    fetch(`/api/agents/${doc.$id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ inr_balance: 0, sar_balance: 0, aed_balance: 0 })
+                    })
                 ));
-                if (res.documents.length < 100) agentDone = true;
             }
             toast.success(`✅ Wiped ${totalDeleted} records. All balances reset to zero.`);
         } catch (e) {
