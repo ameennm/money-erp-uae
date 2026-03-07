@@ -7,5 +7,14 @@ export default defineConfig({
   server: {
     port: 5174,
     open: true,
+    proxy: {
+      // Forwards all /api/* calls to the live Cloudflare Pages deployment
+      // so local dev uses the real production D1 database
+      '/api': {
+        target: 'https://money-erp-uae.pages.dev',
+        changeOrigin: true,
+        secure: true,
+      }
+    }
   }
 })

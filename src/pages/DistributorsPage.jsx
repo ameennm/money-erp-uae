@@ -42,6 +42,10 @@ export default function DistributorsPage() {
     const [form, setForm] = useState(EMPTY);
     const [depositModal, setDepositModal] = useState(false);
     const [depositAmount, setDepositAmount] = useState('');
+    const [transferModal, setTransferModal] = useState(false);
+    const [transferFrom, setTransferFrom] = useState(null);
+    const [transferTo, setTransferTo] = useState('');
+    const [transferAmount, setTransferAmount] = useState('');
     const [saving, setSaving] = useState(false);
 
     const fetchAll = async () => {
@@ -63,9 +67,11 @@ export default function DistributorsPage() {
     };
 
     useEffect(() => { fetchAll(); }, []);
-    const getDistTxs = (distId) => txs.filter(t => t.distributor_id === distId && t.status === 'completed'); const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
+    const getDistTxs = (distId) => txs.filter(t => t.distributor_id === distId && t.status === 'completed');
+    const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
     const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositModal(true); };
+    const openTransfer = (d) => { setTransferFrom(d); setTransferTo(''); setTransferAmount(''); setTransferModal(true); };
 
     const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
@@ -117,7 +123,12 @@ export default function DistributorsPage() {
         setSaving(true);
         try {
             const payload = { ...form };
-            payload.inr_balance = round2(payload.inr_balance || 0);
+            // When creating, always start with 0 balance — deposits will add balance
+            if (!editItem) {
+                payload.inr_balance = 0;
+            } else {
+                payload.inr_balance = round2(payload.inr_balance || 0);
+            }
             if (editItem) {
                 await dbService.updateAgent(editItem.$id, payload);
                 toast.success('Distributor Updated');
@@ -129,6 +140,56 @@ export default function DistributorsPage() {
             fetchAll();
         } catch (e) {
             toast.error(e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleTransfer = async (e) => {
+        e.preventDefault();
+        const amt = round2(parseFloat(transferAmount) || 0);
+        if (!amt || amt <= 0) return toast.error('Enter a valid amount');
+        if (!transferTo) return toast.error('Select a target distributor');
+        const fromBal = round2(transferFrom.inr_balance || 0);
+        if (amt > fromBal + 0.01) {
+            return toast.error(`${transferFrom.name} only has ₹${fromBal.toLocaleString('en-IN')} available`);
+        }
+        const toDist = distributors.find(d => d.$id === transferTo);
+        if (!toDist) return toast.error('Target distributor not found');
+        setSaving(true);
+        try {
+            const newFromBal = round2(fromBal - amt);
+            const newToBal = round2((toDist.inr_balance || 0) + amt);
+            await Promise.all([
+                dbService.updateAgent(transferFrom.$id, { inr_balance: newFromBal }),
+                dbService.updateAgent(toDist.$id, { inr_balance: newToBal }),
+            ]);
+            // Record as two expense entries for audit trail
+            await Promise.all([
+                dbService.createExpense({
+                    title: `Transfer Out — ${transferFrom.name} → ${toDist.name}`,
+                    type: 'expense',
+                    category: 'Distributor Deposit',
+                    amount: amt,
+                    currency: 'INR',
+                    date: new Date().toISOString().split('T')[0],
+                    notes: `Transferred ₹${amt.toLocaleString('en-IN')} from ${transferFrom.name} to ${toDist.name}`,
+                }),
+                dbService.createExpense({
+                    title: `Transfer In — ${transferFrom.name} → ${toDist.name}`,
+                    type: 'income',
+                    category: 'Distributor Deposit',
+                    amount: amt,
+                    currency: 'INR',
+                    date: new Date().toISOString().split('T')[0],
+                    notes: `Received ₹${amt.toLocaleString('en-IN')} from ${transferFrom.name}`,
+                }),
+            ]);
+            toast.success(`✅ ₹${amt.toLocaleString('en-IN')} transferred from ${transferFrom.name} to ${toDist.name}`);
+            setTransferModal(false);
+            fetchAll();
+        } catch (err) {
+            toast.error('Transfer failed: ' + err.message);
         } finally {
             setSaving(false);
         }
@@ -225,6 +286,14 @@ export default function DistributorsPage() {
                                                     <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)}>
                                                         Deposit
                                                     </button>
+                                                    <button
+                                                        className="btn btn-outline btn-sm"
+                                                        style={{ color: '#a78bfa', borderColor: '#a78bfa' }}
+                                                        onClick={() => openTransfer(dist)}
+                                                        title="Transfer balance to another distributor"
+                                                    >
+                                                        Transfer
+                                                    </button>
                                                     <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(dist)}>
                                                         <Pencil size={14} />
                                                     </button>
@@ -255,15 +324,38 @@ export default function DistributorsPage() {
                     status: t.status
                 }));
 
-                let depEvents = expenseRecs.filter(e => e.category === 'Distributor Deposit' && (e.title?.includes(viewingDist.name) || e.notes?.includes(viewingDist.name))).map(e => ({
-                    type: 'deposit',
-                    $createdAt: e.$createdAt || e.date,
-                    $id: e.$id,
-                    amount: Number(e.amount),
-                    ref: 'DEP',
-                    details: 'Admin Deposit',
-                    status: 'completed'
-                }));
+                let depEvents = expenseRecs
+                    .filter(e => {
+                        if (e.category !== 'Distributor Deposit') return false;
+                        const title = e.title || '';
+                        const notes = e.notes || '';
+                        const name = viewingDist.name;
+                        // Regular deposit TO this distributor
+                        if (title.includes(`Deposit to ${name}`) || title === `Deposit to ${name}`) return true;
+                        // Transfer OUT from this distributor: "Transfer Out — NAME → Other"
+                        if (title.startsWith(`Transfer Out — ${name}`) || title.startsWith(`Transfer Out — ${name} →`)) return true;
+                        // Transfer IN to this distributor: "Transfer In — Other → NAME"
+                        if (title.includes('Transfer In') && title.endsWith(`→ ${name}`)) return true;
+                        // Fallback: generic deposit note with this name but NOT a transfer-in going somewhere else
+                        if (notes.includes(name) && !title.includes('Transfer In')) return true;
+                        return false;
+                    })
+                    .map(e => {
+                        const title = e.title || '';
+                        const name = viewingDist.name;
+                        const isTransferOut = title.startsWith(`Transfer Out — ${name}`);
+                        const isTransferIn = title.includes('Transfer In') && title.endsWith(`→ ${name}`);
+                        const sign = isTransferOut ? -1 : 1; // Transfer Out = debit (negative)
+                        return {
+                            type: isTransferOut ? 'transfer_out' : isTransferIn ? 'transfer_in' : 'deposit',
+                            $createdAt: e.$createdAt || e.date,
+                            $id: e.$id,
+                            amount: sign * Number(e.amount),
+                            ref: isTransferOut ? '↑OUT' : isTransferIn ? '↓IN' : 'DEP',
+                            details: title || 'Admin Deposit',
+                            status: 'completed'
+                        };
+                    });
 
                 // Commission expenses linked to this distributor
                 let commEvents = expenseRecs.filter(e =>
@@ -342,11 +434,19 @@ export default function DistributorsPage() {
                                     )}
                                 </div>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+                                    {/* Current Balance — matches outside table exactly */}
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.07)', border: '2px solid rgba(0,200,150,0.3)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Current Balance (DB)</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                            ₹{round2(viewingDist.inr_balance || 0).toLocaleString('en-IN')}
+                                        </div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Same as outside table</div>
+                                    </div>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Distributions (Count)</div>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Distributions</div>
                                         <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                            {periodDistributions.length}
+                                            {periodDistributions.length} txs
                                         </div>
                                     </div>
                                     <div className="card" style={{ padding: '16px', background: 'rgba(167,139,250,0.05)' }}>
@@ -355,10 +455,10 @@ export default function DistributorsPage() {
                                             ₹{Math.abs(periodDistributions.reduce((sum, t) => sum + t.amount, 0)).toLocaleString('en-IN')}
                                         </div>
                                     </div>
-                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.15)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Deposited to Him</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                            ₹{filteredEvents.filter(e => e.type === 'deposit').reduce((sum, e) => sum + e.amount, 0).toLocaleString('en-IN')}
+                                    <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Deposited</div>
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                            ₹{filteredEvents.filter(e => e.type === 'deposit' || e.type === 'transfer_in').reduce((sum, e) => sum + e.amount, 0).toLocaleString('en-IN')}
                                         </div>
                                     </div>
                                 </div>
@@ -440,11 +540,19 @@ export default function DistributorsPage() {
                                     <input className="form-input" placeholder="e.g. +91 9876543210"
                                         value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Starting INR Balance</label>
-                                    <input className="form-input" type="number" step="0.01"
-                                        value={form.inr_balance || ''} onChange={e => setForm({ ...form, inr_balance: parseFloat(e.target.value) || 0 })} />
-                                </div>
+                                {editItem && (
+                                    <div className="form-group">
+                                        <label className="form-label">INR Balance (manual correction only)</label>
+                                        <input className="form-input" type="number" step="0.01"
+                                            value={form.inr_balance || ''} onChange={e => setForm({ ...form, inr_balance: parseFloat(e.target.value) || 0 })} />
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>⚠️ Use the Deposit button to add funds. Only edit this to correct mistakes.</div>
+                                    </div>
+                                )}
+                                {!editItem && (
+                                    <div style={{ padding: '10px 14px', background: 'rgba(74,158,255,0.06)', borderRadius: 8, border: '1px solid rgba(74,158,255,0.2)', fontSize: 13, color: 'var(--text-secondary)' }}>
+                                        💡 Balance starts at <strong>₹0</strong>. Use the <strong>Deposit</strong> button after creating to add funds.
+                                    </div>
+                                )}
                                 <div className="form-group">
                                     <label className="form-label">Notes</label>
                                     <textarea className="form-textarea" placeholder="Location, bank details, etc."
@@ -501,6 +609,88 @@ export default function DistributorsPage() {
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setDepositModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-accent" disabled={saving || availableINR <= 0}>Confirm Deposit</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Transfer Modal */}
+            {transferModal && transferFrom && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setTransferModal(false)}>
+                    <div className="modal">
+                        <div className="modal-header">
+                            <div>
+                                <h3 className="modal-title">Transfer Balance</h3>
+                                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Move INR balance from one distributor to another</div>
+                            </div>
+                            <button className="close-btn" onClick={() => setTransferModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleTransfer}>
+                            <div className="modal-body">
+                                {/* From distributor info */}
+                                <div className="card" style={{ background: 'var(--bg-main)', padding: 16, marginBottom: 16, border: '1px solid rgba(167,139,250,0.25)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>From: <strong style={{ color: 'var(--text-primary)' }}>{transferFrom.name}</strong></span>
+                                        <span style={{ fontSize: 20, fontWeight: 800, color: '#a78bfa' }}>
+                                            ₹{round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label">Transfer To *</label>
+                                    <select className="form-select" required value={transferTo}
+                                        onChange={e => setTransferTo(e.target.value)}>
+                                        <option value="">Select Distributor</option>
+                                        {distributors
+                                            .filter(d => d.$id !== transferFrom.$id)
+                                            .map(d => (
+                                                <option key={d.$id} value={d.$id}>
+                                                    {d.name} (Bal: ₹{round2(d.inr_balance || 0).toLocaleString('en-IN')})
+                                                </option>
+                                            ))
+                                        }
+                                    </select>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label">Amount to Transfer (INR)</label>
+                                    <input
+                                        className="form-input"
+                                        type="number"
+                                        step="0.01"
+                                        min="0.01"
+                                        max={round2(transferFrom.inr_balance || 0)}
+                                        required
+                                        autoFocus
+                                        placeholder={`Max ₹${round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')}`}
+                                        value={transferAmount}
+                                        onChange={e => setTransferAmount(e.target.value)}
+                                        style={{ fontSize: 20, fontWeight: 700, height: 52 }}
+                                    />
+                                    {transferAmount && parseFloat(transferAmount) > 0 && parseFloat(transferAmount) <= round2(transferFrom.inr_balance || 0) && (
+                                        <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 6 }}>
+                                            ✓ {transferFrom.name} remaining: <strong>₹{round2(round2(transferFrom.inr_balance || 0) - parseFloat(transferAmount)).toLocaleString('en-IN')}</strong>
+                                        </div>
+                                    )}
+                                    {transferAmount && parseFloat(transferAmount) > round2(transferFrom.inr_balance || 0) && (
+                                        <div style={{ fontSize: 12, color: 'var(--status-failed)', marginTop: 6 }}>
+                                            ⚠️ Exceeds available balance (₹{round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')})
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-outline" onClick={() => setTransferModal(false)}>Cancel</button>
+                                <button
+                                    type="submit"
+                                    className="btn btn-accent"
+                                    disabled={saving || !transferAmount || !transferTo || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > round2(transferFrom.inr_balance || 0) + 0.01}
+                                    style={{ minWidth: 160 }}
+                                >
+                                    {saving ? 'Transferring…' : '↔ Confirm Transfer'}
+                                </button>
                             </div>
                         </form>
                     </div>

@@ -147,14 +147,15 @@ export default function AgentsPage() {
         }
     };
 
+    // Build agent ledger with running per-row paid/owed
     const getAgentTxs = (agentId) => {
         let agentRecords = txs.filter(t => t.collection_agent_id === agentId);
         agentRecords.sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
 
-        let runningTotal = 0;
+        let cumulativeCollected = 0;
         return agentRecords.map(t => {
-            runningTotal += Number(t.collected_amount) || 0;
-            return { ...t, running_balance: runningTotal };
+            cumulativeCollected += Number(t.collected_amount) || 0;
+            return { ...t, cumulative_collected: cumulativeCollected };
         });
     };
 
@@ -164,6 +165,7 @@ export default function AgentsPage() {
         const owedBal = cur === 'AED'
             ? round2(agent.aed_balance || 0)
             : round2(agent.sar_balance || 0);
+        const paidToUs = round2(Math.max(0, totalCollected - owedBal));
 
         const lines = [
             `📋 *Agent Ledger: ${agent.name}*`,
@@ -175,6 +177,7 @@ export default function AgentsPage() {
             filteredTxs.length > 25 ? `...and ${filteredTxs.length - 25} more transactions` : '',
             `─────────────────────`,
             `Total Collected: *${totalCollected.toLocaleString()} ${cur}*`,
+            `They Paid to Us: *${paidToUs.toLocaleString()} ${cur}*`,
             `Amount Owed to Us: *${owedBal.toLocaleString()} ${cur}*`,
             `Transactions: ${filteredTxs.length}`,
             ``,
@@ -185,9 +188,18 @@ export default function AgentsPage() {
         window.open(`https://wa.me/?text=${text}`, '_blank');
     };
 
+    // ── Overall summary across all collection agents ──
+    const totalSarOwed = round2(agents.reduce((s, a) => s + (a.sar_balance || 0), 0));
+    const totalAedOwed = round2(agents.reduce((s, a) => s + (a.aed_balance || 0), 0));
+    const totalCollectedSar = round2(txs.filter(t => (t.collected_currency || 'SAR') === 'SAR').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
+    const totalCollectedAed = round2(txs.filter(t => t.collected_currency === 'AED').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
+    // Paid to us = total collected minus still owed
+    const totalPaidSar = round2(Math.max(0, totalCollectedSar - totalSarOwed));
+    const totalPaidAed = round2(Math.max(0, totalCollectedAed - totalAedOwed));
+
     return (
         <Layout title="Agents">
-            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
                 <div>
                     <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                         {agents.length} agent{agents.length !== 1 ? 's' : ''} registered
@@ -197,6 +209,30 @@ export default function AgentsPage() {
                     <Plus size={16} /> Add Agent
                 </button>
             </div>
+
+            {/* Overall Summary Stats */}
+            {!loading && agents.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
+                    {/* Total Distributed */}
+                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(74,158,255,0.05)', border: '1px solid rgba(74,158,255,0.15)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Distributed</div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
+                        {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                    </div>
+                    {/* Total Paid to Us */}
+                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.15)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Agent Paid to Us</div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-accent)' }}>{totalPaidSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
+                        {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-accent)', marginTop: 2 }}>{totalPaidAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                    </div>
+                    {/* Total Owed to Us */}
+                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(245,166,35,0.05)', border: '1px solid rgba(245,166,35,0.15)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Agent Owed Us</div>
+                        <div style={{ fontSize: 17, fontWeight: 800, color: totalSarOwed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>{totalSarOwed.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
+                        {totalAedOwed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalAedOwed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                    </div>
+                </div>
+            )}
 
             {loading ? (
                 <div className="loading-screen" style={{ minHeight: '40vh' }}>
@@ -218,81 +254,93 @@ export default function AgentsPage() {
                                     <th>Phone</th>
                                     <th>Location</th>
                                     <th>Currency</th>
-                                    <th style={{ textAlign: 'right' }}>SAR Owed</th>
-                                    <th style={{ textAlign: 'right' }}>AED Owed</th>
+                                    <th style={{ textAlign: 'right' }}>Total Distributed</th>
+                                    <th style={{ textAlign: 'right' }}>Paid to Us</th>
+                                    <th style={{ textAlign: 'right' }}>Owed to Us</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {agents.map((a, i) => (
-                                    <tr key={a.$id}>
-                                        <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                                        <td style={{ fontWeight: 600 }}>
-                                            <div className="flex items-center gap-2">
-                                                <div style={{
-                                                    width: 32, height: 32, borderRadius: '50%',
-                                                    background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))',
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                    fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
-                                                }}>
-                                                    {a.name?.[0]?.toUpperCase()}
-                                                </div>
-                                                <button
-                                                    onClick={() => openHistory(a)}
-                                                    style={{
-                                                        background: 'none', border: 'none', padding: 0,
-                                                        fontWeight: 'inherit', cursor: 'pointer',
-                                                        textDecoration: 'underline', color: 'var(--brand-accent)'
-                                                    }}
-                                                >
-                                                    {a.name}
-                                                </button>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
-                                                <Phone size={13} /> {a.phone || '—'}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
-                                                <MapPin size={13} /> {a.location || '—'}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span className={`badge ${a.currency === 'AED' ? 'badge-admin' : 'badge-collector'}`}>
-                                                {a.currency || 'SAR'}
-                                            </span>
-                                        </td>
-                                        <td style={{ textAlign: 'right', fontWeight: 700, color: (a.sar_balance || 0) > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
-                                            {round2(a.sar_balance || 0).toLocaleString()}
-                                        </td>
-                                        <td style={{ textAlign: 'right', fontWeight: 700, color: (a.aed_balance || 0) > 0 ? 'var(--brand-gold)' : 'var(--text-muted)' }}>
-                                            {round2(a.aed_balance || 0).toLocaleString()}
-                                        </td>
-                                        <td>
-                                            <div className="flex gap-2">
-                                                {/* Receive Payment — only show if agent owes us something */}
-                                                {((a.currency === 'AED' ? (a.aed_balance || 0) : (a.sar_balance || 0)) > 0) && (
+                                {agents.map((a, i) => {
+                                    const cur = a.currency || 'SAR';
+                                    const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
+                                    const owed = round2(a[owedField] || 0);
+                                    const agentTxList = txs.filter(t => t.collection_agent_id === a.$id);
+                                    const totalDistributed = round2(agentTxList.reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
+                                    const paidToUs = round2(Math.max(0, totalDistributed - owed));
+                                    return (
+                                        <tr key={a.$id}>
+                                            <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                            <td style={{ fontWeight: 600 }}>
+                                                <div className="flex items-center gap-2">
+                                                    <div style={{
+                                                        width: 32, height: 32, borderRadius: '50%',
+                                                        background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
+                                                    }}>
+                                                        {a.name?.[0]?.toUpperCase()}
+                                                    </div>
                                                     <button
-                                                        className="btn btn-sm"
-                                                        style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 700 }}
-                                                        onClick={() => openPayment(a)}
-                                                        title="Record payment received from agent"
+                                                        onClick={() => openHistory(a)}
+                                                        style={{
+                                                            background: 'none', border: 'none', padding: 0,
+                                                            fontWeight: 'inherit', cursor: 'pointer',
+                                                            textDecoration: 'underline', color: 'var(--brand-accent)'
+                                                        }}
                                                     >
-                                                        <Banknote size={13} /> Receive
+                                                        {a.name}
                                                     </button>
-                                                )}
-                                                <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}>
-                                                    <Pencil size={14} />
-                                                </button>
-                                                <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a.$id)}>
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                                                    <Phone size={13} /> {a.phone || '—'}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                                                    <MapPin size={13} /> {a.location || '—'}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span className={`badge ${a.currency === 'AED' ? 'badge-admin' : 'badge-collector'}`}>
+                                                    {a.currency || 'SAR'}
+                                                </span>
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
+                                                {totalDistributed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: paidToUs > 0 ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
+                                                {paidToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: owed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                                {owed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                            </td>
+                                            <td>
+                                                <div className="flex gap-2">
+                                                    {/* Receive Payment — only show if agent owes us something */}
+                                                    {owed > 0 && (
+                                                        <button
+                                                            className="btn btn-sm"
+                                                            style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 700 }}
+                                                            onClick={() => openPayment(a)}
+                                                            title="Record payment received from agent"
+                                                        >
+                                                            <Banknote size={13} /> Receive
+                                                        </button>
+                                                    )}
+                                                    <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}>
+                                                        <Pencil size={14} />
+                                                    </button>
+                                                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a.$id)}>
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -308,17 +356,29 @@ export default function AgentsPage() {
                     ? round2(viewingAgent.aed_balance || 0)
                     : round2(viewingAgent.sar_balance || 0);
 
+                const allTimeCollected = allTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
+                const paidToUsTotal = round2(Math.max(0, allTimeCollected - owedBal));
+
                 const exportLedgerExcel = () => {
-                    const rows = filteredTxs.map((t, idx) => ({
-                        '#': idx + 1,
-                        'Date': t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yyyy HH:mm') : '',
-                        'Ref': '#' + t.tx_id,
-                        'Client': t.client_name,
-                        'Collected': Number(t.collected_amount),
-                        'Currency': t.collected_currency,
-                        'Running Balance': Number(t.running_balance),
-                        'Status': t.status,
-                    }));
+                    const rows = filteredTxs.map((t, idx) => {
+                        const sarGot = Number(t.collected_amount) || 0;
+                        const cumCollected = Number(t.cumulative_collected) || 0;
+                        // Running paid: cumulative collected so far minus total still owed
+                        // (approximation: as more was collected, eventually the owed shrinks)
+                        const rowPaidToUs = round2(Math.max(0, cumCollected - owedBal));
+                        const rowOwedToUs = round2(Math.max(0, owedBal - Math.max(0, allTimeCollected - cumCollected)));
+                        return {
+                            '#': idx + 1,
+                            'Date': t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yyyy') : '',
+                            'Distributor': t.distributor_name || '',
+                            'Conversion Rate (per 1000 INR)': Number(t.collection_rate) || '',
+                            'INR to Distribute': Number(t.inr_requested) || '',
+                            'SAR We Got': sarGot,
+                            'Currency': t.collected_currency || cur,
+                            'They Paid Amount': rowPaidToUs,
+                            'They Owed Us': rowOwedToUs,
+                        };
+                    });
                     const ws = XLSX.utils.json_to_sheet(rows);
                     const wb = XLSX.utils.book_new();
                     XLSX.utils.book_append_sheet(wb, ws, viewingAgent.name);
@@ -327,7 +387,7 @@ export default function AgentsPage() {
 
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
-                        <div className="modal" style={{ maxWidth: '900px', width: '90%', maxHeight: '90vh' }}>
+                        <div className="modal" style={{ maxWidth: '1000px', width: '95%', maxHeight: '90vh' }}>
                             <div className="modal-header">
                                 <div>
                                     <h3 className="modal-title">Transaction Ledger: {viewingAgent.name}</h3>
@@ -379,74 +439,98 @@ export default function AgentsPage() {
                                 </div>
 
                                 {/* Summary Cards */}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-                                    <div className="card" style={{ padding: '16px', background: 'rgba(74,158,255,0.05)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Period Collections</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                            {filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
+                                {(() => {
+                                    const periodCollected = filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
+                                    return (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+                                            <div className="card" style={{ padding: '14px', background: 'rgba(74,158,255,0.05)' }}>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Period SAR We Got</div>
+                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                                    {periodCollected.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
+                                                </div>
+                                            </div>
+                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.12)' }}>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total Collected (All Time)</div>
+                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                                    {allTimeCollected.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
+                                                </div>
+                                            </div>
+                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.06)', border: '1px solid rgba(0,200,150,0.18)' }}>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>They Paid to Us</div>
+                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                                    {paidToUsTotal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
+                                                </div>
+                                            </div>
+                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.05)' }}>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Transaction Count</div>
+                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                                    {filteredTxs.length}
+                                                </div>
+                                            </div>
+                                            <div className="card" style={{ padding: '14px', background: cur === 'AED' ? 'rgba(245,166,35,0.07)' : 'rgba(74,158,255,0.07)', border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.2)' : 'rgba(74,158,255,0.2)'}` }}>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total Owed to Us</div>
+                                                <div style={{ fontSize: '18px', fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
+                                                    {owedBal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.12)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Collected (All Time)</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                            {allTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0).toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
-                                        </div>
-                                    </div>
-                                    <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.05)' }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Transaction Count</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                            {filteredTxs.length}
-                                        </div>
-                                    </div>
-                                    <div className="card" style={{ padding: '16px', background: cur === 'AED' ? 'rgba(245,166,35,0.07)' : 'rgba(74,158,255,0.07)', border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.2)' : 'rgba(74,158,255,0.2)'}` }}>
-                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Total Owed to Us</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
-                                            {owedBal.toLocaleString()} <span style={{ fontSize: 12 }}>{cur}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                    );
+                                })()}
 
                                 <div className="table-wrapper" style={{ flex: 1 }}>
                                     <table className="data-table" style={{ fontSize: 13 }}>
                                         <thead>
                                             <tr>
-                                                <th style={{ width: 40 }}>#</th>
+                                                <th style={{ width: 30 }}>#</th>
                                                 <th>Date</th>
-                                                <th>Ref/Client</th>
                                                 <th>Distributor</th>
-                                                <th style={{ textAlign: 'right' }}>Collected</th>
-                                                <th style={{ textAlign: 'right' }}>Running Bal</th>
-                                                <th>Status</th>
+                                                <th style={{ textAlign: 'right' }}>Conv. Rate<br /><span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>per 1000 INR</span></th>
+                                                <th style={{ textAlign: 'right' }}>INR to Distribute</th>
+                                                <th style={{ textAlign: 'right' }}>SAR We Got</th>
+                                                <th style={{ textAlign: 'right' }}>They Paid Amount</th>
+                                                <th style={{ textAlign: 'right' }}>They Owed Us</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {filteredTxs.length === 0 ? (
-                                                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
+                                                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
                                             ) : (
-                                                filteredTxs.map((t, idx) => (
-                                                    <tr key={t.$id}>
-                                                        <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy HH:mm') : '—'}</td>
-                                                        <td style={{ fontWeight: 500 }}>
-                                                            <span style={{ color: 'var(--brand-accent)', fontSize: 11, marginRight: 6 }}>#{t.tx_id}</span>
-                                                            <br />{t.client_name}
-                                                        </td>
-                                                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                                            {t.distributor_name || '—'}
-                                                        </td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
-                                                            {Number(t.collected_amount).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
-                                                        </td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                                            {Number(t.running_balance).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
-                                                        </td>
-                                                        <td>
-                                                            <span className="badge badge-collector" style={{ fontSize: 10 }}>
-                                                                {t.status.replace('_', ' ')}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                ))
+                                                filteredTxs.map((t, idx) => {
+                                                    const sarGot = Number(t.collected_amount) || 0;
+                                                    const cumCollected = Number(t.cumulative_collected) || 0;
+                                                    // Running paid per row: cumulative collected minus still outstanding
+                                                    const rowPaidToUs = round2(Math.max(0, cumCollected - owedBal));
+                                                    // Running owed: what remains outstanding after this row
+                                                    const remainingAfterThisRow = round2(allTimeCollected - cumCollected);
+                                                    const rowOwedToUs = round2(Math.max(0, owedBal - remainingAfterThisRow));
+
+                                                    return (
+                                                        <tr key={t.$id}>
+                                                            <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                            <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                                                {t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}
+                                                            </td>
+                                                            <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                                                {t.distributor_name || '—'}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--brand-primary)' }}>
+                                                                {t.collection_rate ? Number(t.collection_rate).toLocaleString() : '—'}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                                                {t.inr_requested ? '₹' + Number(t.inr_requested).toLocaleString('en-IN') : '—'}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
+                                                                {sarGot.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-accent)' }}>
+                                                                {rowPaidToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 800, color: rowOwedToUs > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                                                {rowOwedToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
                                             )}
                                         </tbody>
                                     </table>

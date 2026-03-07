@@ -461,6 +461,7 @@ export default function TransactionsPage() {
                                 <th>Collected</th>
                                 <th>Agent</th>
                                 {isAdmin && <th>Profit</th>}
+                                {isAdmin && <th>Distributor</th>}
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -486,6 +487,11 @@ export default function TransactionsPage() {
                                         {isAdmin && (
                                             <td style={{ color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
                                                 {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')} ${profitCur}` : '—'}
+                                            </td>
+                                        )}
+                                        {isAdmin && (
+                                            <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                                {tx.distributor_name || '—'}
                                             </td>
                                         )}
                                         <td>{statusBadge(tx.status)}</td>
