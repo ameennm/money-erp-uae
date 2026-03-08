@@ -203,7 +203,7 @@ export default function DashboardPage() {
     const balanceAED = totalAEDFromConversions + incByCur('AED') - expByCur('AED') - totalAEDConvertedToINR;
 
     // INR Balance = total INR received (deposits) minus general expenses minus INR already paid out to clients
-    const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer').reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const totalINRDistributed = sumF(completed, 'actual_inr_distributed');
 
     // INR deposited to distributors
