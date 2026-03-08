@@ -306,6 +306,21 @@ export default function DistributorsPage() {
                                     );
                                 })}
                             </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: '#a78bfa' }}>GRAND TOTAL</td>
+                                    <td style={{ fontWeight: 800 }}>
+                                        {distributors.reduce((sum, d) => sum + getDistTxs(d.$id).length, 0)} txs
+                                    </td>
+                                    <td style={{ fontWeight: 800, color: '#a78bfa' }}>
+                                        ₹{distributors.reduce((sum, d) => sum + getDistTxs(d.$id).reduce((s, t) => s + (Number(t.actual_inr_distributed) || 0), 0), 0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td style={{ fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                        ₹{distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td colSpan={2}></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>

@@ -42,6 +42,7 @@ export default function ReportsPage() {
     const [showTx, setShowTx] = useState(true);
     const [showIncome, setShowIncome] = useState(true);
     const [showExpense, setShowExpense] = useState(true);
+    const [currencyFilter, setCurrencyFilter] = useState('All');
 
     const fetchAll = async () => {
         setLoading(true);
@@ -79,6 +80,22 @@ export default function ReportsPage() {
                 agent: tx.collection_agent_name || '',
                 notes: tx.notes || '',
             });
+
+            // Distribution (Debit in INR) - money leaving the system!
+            if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
+                allEntries.push({
+                    _type: 'transaction',
+                    _date: tx.$updatedAt || tx.$createdAt,
+                    _id: tx.$id + '_dist',
+                    particular: `${tx.client_name} — Distribution`,
+                    txId: tx.tx_id || '',
+                    currency: 'INR',
+                    credit: 0,
+                    debit: Number(tx.actual_inr_distributed),
+                    agent: tx.distributor_name || '',
+                    notes: tx.notes || '',
+                });
+            }
         });
     }
 
@@ -100,20 +117,23 @@ export default function ReportsPage() {
     }
 
     if (showExpense) {
-        expenses.filter(e => e.type !== 'income').forEach(e => {
-            allEntries.push({
-                _type: 'expense',
-                _date: e.$createdAt,
-                _id: e.$id,
-                particular: e.title || 'Expense',
-                txId: '',
-                currency: e.currency || 'AED',
-                credit: 0,
-                debit: Number(e.amount) || 0,
-                agent: '',
-                notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
+        // Exclude internal transfers/deposits to distributors since they are still inside the system
+        expenses
+            .filter(e => e.type !== 'income' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer')
+            .forEach(e => {
+                allEntries.push({
+                    _type: 'expense',
+                    _date: e.$createdAt,
+                    _id: e.$id,
+                    particular: e.title || 'Expense',
+                    txId: '',
+                    currency: e.currency || 'AED',
+                    credit: 0,
+                    debit: Number(e.amount) || 0,
+                    agent: '',
+                    notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
+                });
             });
-        });
     }
 
     // Sort by date ascending for ledger
@@ -121,17 +141,21 @@ export default function ReportsPage() {
 
     // Apply filters
     const dateFiltered = applyDateRange(allEntries, dateRange, customFrom, customTo);
-    const filtered = dateFiltered.filter(r =>
-        r.particular?.toLowerCase().includes(search.toLowerCase()) ||
-        r.txId?.includes(search) ||
-        r.agent?.toLowerCase().includes(search.toLowerCase()) ||
-        r.notes?.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = dateFiltered.filter(r => {
+        const matchCurrency = currencyFilter === 'All' || r.currency === currencyFilter;
+        const matchSearch = r.particular?.toLowerCase().includes(search.toLowerCase()) ||
+            r.txId?.includes(search) ||
+            r.agent?.toLowerCase().includes(search.toLowerCase()) ||
+            r.notes?.toLowerCase().includes(search.toLowerCase());
+        return matchCurrency && matchSearch;
+    });
 
     // Ledger totals per currency
-    const currencies = ['SAR', 'AED', 'INR'];
+    const allCurrencies = ['SAR', 'AED', 'INR'];
+    const displayCurrencies = currencyFilter === 'All' ? allCurrencies : [currencyFilter];
+
     const totals = {};
-    currencies.forEach(cur => {
+    displayCurrencies.forEach(cur => {
         const curEntries = filtered.filter(e => e.currency === cur);
         const totalCredit = curEntries.reduce((a, e) => a + e.credit, 0);
         const totalDebit = curEntries.reduce((a, e) => a + e.debit, 0);
@@ -166,7 +190,7 @@ export default function ReportsPage() {
         // Add summary rows
         rows.push({});
         rows.push({ '#': '', 'Date': '', 'Particular': 'SUMMARY', 'TX ID': '', 'Type': '', 'Currency': '', 'Credit': '', 'Debit': '' });
-        currencies.forEach(cur => {
+        displayCurrencies.forEach(cur => {
             rows.push({
                 '#': '', 'Date': '', 'Particular': `${cur} Totals`,
                 'TX ID': '', 'Type': '', 'Currency': cur,
@@ -195,7 +219,7 @@ export default function ReportsPage() {
             `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
             `─────────────────────`,
             `*Currency Summary:*`,
-            ...['SAR', 'AED', 'INR']
+            ...displayCurrencies
                 .filter(cur => totals[cur].credit > 0 || totals[cur].debit > 0)
                 .map(cur => `${cur}: Credit ${fmt(totals[cur].credit)} | Debit ${fmt(totals[cur].debit)} | Balance ${fmt(totals[cur].balance)}`),
             `─────────────────────`,
@@ -234,7 +258,7 @@ export default function ReportsPage() {
                 Ledger Summary — {dateRange}
             </div>
             <div className="stats-grid" style={{ marginBottom: 28 }}>
-                {currencies.map(cur => {
+                {displayCurrencies.map(cur => {
                     const t = totals[cur];
                     const colors = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' };
                     const col = colors[cur];
@@ -309,6 +333,13 @@ export default function ReportsPage() {
                         <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search particulars..."
                             value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
+                    <select className="form-select" style={{ maxWidth: 140, fontSize: 13, padding: '6px 10px' }}
+                        value={currencyFilter} onChange={e => setCurrencyFilter(e.target.value)}>
+                        <option value="All">All Currencies</option>
+                        <option value="SAR">SAR Only</option>
+                        <option value="AED">AED Only</option>
+                        <option value="INR">INR Only</option>
+                    </select>
                     <button className="btn btn-outline" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
                         <Download size={16} /> Excel
                     </button>
@@ -392,7 +423,7 @@ export default function ReportsPage() {
                                 ))}
                             </tbody>
                             <tfoot>
-                                {currencies.map(cur => {
+                                {displayCurrencies.map(cur => {
                                     const t = totals[cur];
                                     if (t.credit === 0 && t.debit === 0) return null;
                                     const colors = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' };

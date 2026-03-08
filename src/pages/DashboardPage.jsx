@@ -419,7 +419,7 @@ export default function DashboardPage() {
             <div className="stats-grid">
                 <div className="stat-card" style={{ '--accent-bar': '#4a9eff' }}>
                     <div className="stat-value">{totalSARCollected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    <div className="stat-label">Total SAR Collected</div>
+                    <div className="stat-label">Total SAR</div>
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': 'var(--brand-gold)' }}>
                     <div className="stat-value">{totalAEDCollected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>

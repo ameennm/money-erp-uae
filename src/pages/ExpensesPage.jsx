@@ -21,6 +21,7 @@ export default function ExpensesPage() {
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
+    const [currencyFilter, setCurrencyFilter] = useState('All');
 
     const fetch = async () => {
         setLoading(true);
@@ -40,12 +41,14 @@ export default function ExpensesPage() {
 
     useEffect(() => { fetch(); }, []);
 
-    const expenseSAR = expenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const expenseAED = expenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const expenseINR = expenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const incomeSAR = expenses.filter(e => e.type === 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const incomeAED = expenses.filter(e => e.type === 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const incomeINR = expenses.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const filteredExpenses = expenses.filter(e => currencyFilter === 'All' || e.currency === currencyFilter);
+
+    const expenseSAR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseAED = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseINR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeSAR = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeAED = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const incomeINR = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
     const handleSave = async (ev) => {
         ev.preventDefault();
@@ -87,7 +90,7 @@ export default function ExpensesPage() {
     };
 
     const exportToExcel = () => {
-        const rows = expenses.map((e, i) => ({
+        const rows = filteredExpenses.map((e, i) => ({
             '#': i + 1,
             'Type': e.type === 'income' ? 'Income' : 'Expense',
             'Title': e.title,
@@ -141,7 +144,7 @@ export default function ExpensesPage() {
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(74,158,255,0.15)', '--icon-color': '#4a9eff' }}>
                         <TrendingUp size={20} />
                     </div>
-                    <div style={{ fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800 }}>{expenses.length}</div>
+                    <div style={{ fontSize: 'clamp(24px,3vw,36px)', fontWeight: 800 }}>{filteredExpenses.length}</div>
                     <div className="stat-label">Total Records</div>
                 </div>
             </div>
@@ -149,9 +152,16 @@ export default function ExpensesPage() {
             {/* Toolbar */}
             <div className="flex items-center justify-between mb-6" style={{ gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500 }}>
-                    {expenses.length} record{expenses.length !== 1 ? 's' : ''}
+                    {filteredExpenses.length} record{filteredExpenses.length !== 1 ? 's' : ''}
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 items-center flex-wrap">
+                    <select className="form-select" style={{ maxWidth: 140, fontSize: 13, padding: '6px 10px', height: '36px' }}
+                        value={currencyFilter} onChange={e => setCurrencyFilter(e.target.value)}>
+                        <option value="All">All Currencies</option>
+                        <option value="SAR">SAR</option>
+                        <option value="AED">AED</option>
+                        <option value="INR">INR</option>
+                    </select>
                     <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
                         <Download size={15} /> Excel
                     </button>
@@ -168,10 +178,10 @@ export default function ExpensesPage() {
                 <div className="loading-screen" style={{ minHeight: '40vh' }}>
                     <div className="spinner" /><p>Loading…</p>
                 </div>
-            ) : expenses.length === 0 ? (
+            ) : filteredExpenses.length === 0 ? (
                 <div className="empty-state card">
                     <TrendingDown size={40} />
-                    <p>No expenses recorded.</p>
+                    <p>No expenses found for selected filters.</p>
                 </div>
             ) : (
                 <div className="card">
@@ -191,7 +201,7 @@ export default function ExpensesPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {expenses.map((exp, i) => (
+                                {filteredExpenses.map((exp, i) => (
                                     <tr key={exp.$id}>
                                         <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                                         <td style={{ fontWeight: 600 }}>
