@@ -77,7 +77,7 @@ export default function DistributorsPage() {
 
     // Available INR (not given to distributors)
     const inrIncome = round2(expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0));
-    const inrGeneralExp = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
+    const inrGeneralExp = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer').reduce((a, e) => a + (Number(e.amount) || 0), 0));
     const inrDeposited = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
     const availableINR = Math.max(0, round2(inrIncome - inrGeneralExp - inrDeposited));
 
@@ -164,12 +164,12 @@ export default function DistributorsPage() {
                 dbService.updateAgent(transferFrom.$id, { inr_balance: newFromBal }),
                 dbService.updateAgent(toDist.$id, { inr_balance: newToBal }),
             ]);
-            // Record as two expense entries for audit trail
+            // Record as two expense entries for audit trail only (internal transfer — no effect on income pool)
             await Promise.all([
                 dbService.createExpense({
                     title: `Transfer Out — ${transferFrom.name} → ${toDist.name}`,
                     type: 'expense',
-                    category: 'Distributor Deposit',
+                    category: 'Distributor Transfer',
                     amount: amt,
                     currency: 'INR',
                     date: new Date().toISOString().split('T')[0],
@@ -177,8 +177,8 @@ export default function DistributorsPage() {
                 }),
                 dbService.createExpense({
                     title: `Transfer In — ${transferFrom.name} → ${toDist.name}`,
-                    type: 'income',
-                    category: 'Distributor Deposit',
+                    type: 'expense',
+                    category: 'Distributor Transfer',
                     amount: amt,
                     currency: 'INR',
                     date: new Date().toISOString().split('T')[0],
@@ -326,7 +326,7 @@ export default function DistributorsPage() {
 
                 let depEvents = expenseRecs
                     .filter(e => {
-                        if (e.category !== 'Distributor Deposit') return false;
+                        if (e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer') return false;
                         const title = e.title || '';
                         const notes = e.notes || '';
                         const name = viewingDist.name;

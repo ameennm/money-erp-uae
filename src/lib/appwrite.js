@@ -20,6 +20,7 @@ export const Query = {
     equal: (key, val) => ({ type: 'equal', key, val }),
     orderDesc: (key) => ({ type: 'orderDesc', key }),
     limit: (val) => ({ type: 'limit', val }),
+    or: (subQueries) => ({ type: 'or', subQueries }),
 };
 
 export const ID = {
@@ -56,11 +57,19 @@ export const authService = {
 };
 
 // ─── DB ───────────────────────────────────────────────────────────────────────
+const matchesQuery = (item, q) => {
+    if (q.type === 'equal') return item[q.key] === q.val;
+    if (q.type === 'or') return q.subQueries.some(sub => matchesQuery(item, sub));
+    return true;
+};
+
 const applyQueries = (data, queries = []) => {
     let filtered = [...data];
     for (const q of queries) {
         if (q.type === 'equal') {
             filtered = filtered.filter(item => item[q.key] === q.val);
+        } else if (q.type === 'or') {
+            filtered = filtered.filter(item => q.subQueries.some(sub => matchesQuery(item, sub)));
         } else if (q.type === 'orderDesc') {
             filtered.sort((a, b) => new Date(b[q.key] || 0) - new Date(a[q.key] || 0));
         } else if (q.type === 'limit') {
