@@ -769,43 +769,70 @@ export default function ConversionAgentsPage() {
             )}
 
             {/* Deposit Modal */}
-            {depositModal && activeAgent && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDepositModal(false)}>
-                    <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Deposit to {activeAgent.name}</h3>
-                            <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setDepositModal(false)}><X size={20} /></button>
-                        </div>
-                        <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleDepositSubmit}>
-                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-                                This will debit <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> from our local ledger
-                                and increase {activeAgent.name}'s owed balance.
-                            </p>
-                            <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Deposit Amount ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
-                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
-                                    value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
+            {depositModal && activeAgent && (() => {
+                const incByCur = (cur) => expenseRecs.filter(e => e.type === 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+                const expByCur = (cur) => expenseRecs.filter(e => e.type === 'expense' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+                const sumF = (arr, field) => arr.reduce((a, r) => a + (Number(r[field]) || 0), 0);
+
+                let availBal = 0;
+                let availCur = '';
+                if (activeAgent.type === 'conversion_sar') {
+                    const totalSARConverted = sumF(convRecs, 'sar_amount');
+                    availBal = incByCur('SAR') - expByCur('SAR') - totalSARConverted;
+                    availCur = 'SAR';
+                } else {
+                    const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
+                    availBal = incByCur('AED') + totalAEDFromConversions - expByCur('AED');
+                    availCur = 'AED';
+                }
+                availBal = Math.max(0, availBal);
+
+                return (
+                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDepositModal(false)}>
+                        <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Deposit to {activeAgent.name}</h3>
+                                <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setDepositModal(false)}><X size={20} /></button>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Fixed Exchange Rate</label>
-                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
-                                    value={actionRate} onChange={e => setActionRate(e.target.value)} />
-                            </div>
-                            {actionAmount && actionRate && (
-                                <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
-                                    Agent will owe us: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}
+                            <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleDepositSubmit}>
+                                <div style={{ padding: 12, background: 'rgba(74,158,255,0.1)', border: '1px solid rgba(74,158,255,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: 13, color: '#4a9eff' }}>Available {availCur} to Deposit:</span>
+                                    <span style={{ fontSize: 16, fontWeight: 800, color: '#4a9eff' }}>
+                                        {availBal.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ fontSize: 13 }}>{availCur}</span>
+                                    </span>
                                 </div>
-                            )}
-                            <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                                <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
-                                    {saving ? 'Processing...' : 'Confirm Deposit'}
-                                </button>
-                            </div>
-                        </form>
+                                <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent's Owed Debt:</span>
+                                    <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? 'var(--brand-gold)' : 'var(--text-primary)' }}>
+                                        {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED` : `₹${(Number(activeAgent.inr_balance) || 0).toLocaleString('en-IN')}`}
+                                    </span>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Deposit Amount ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
+                                    <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                        value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Fixed Exchange Rate</label>
+                                    <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                        value={actionRate} onChange={e => setActionRate(e.target.value)} />
+                                </div>
+                                {actionAmount && actionRate && (
+                                    <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
+                                        Agent will owe us: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}
+                                    </div>
+                                )}
+                                <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                                    <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
+                                    <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
+                                        {saving ? 'Processing...' : 'Confirm Deposit'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Receive Modal */}
             {receiveModal && activeAgent && (
@@ -820,6 +847,12 @@ export default function ConversionAgentsPage() {
                                 This will credit <b>{activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}</b> to our local ledger
                                 and decrease {activeAgent.name}'s owed balance. (If we receive more than they owe, their balance will go negative indicating we owe them.)
                             </p>
+                            <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Current Balance:</span>
+                                <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? 'var(--brand-gold)' : 'var(--text-primary)' }}>
+                                    {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED` : `₹${(Number(activeAgent.inr_balance) || 0).toLocaleString('en-IN')}`}
+                                </span>
+                            </div>
                             <div className="form-group">
                                 <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Amount Received ({activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'})</label>
                                 <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
@@ -834,8 +867,9 @@ export default function ConversionAgentsPage() {
                         </form>
                     </div>
                 </div>
-            )}
+            )
+            }
 
-        </Layout>
+        </Layout >
     );
 }
