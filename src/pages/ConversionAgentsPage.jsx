@@ -59,6 +59,14 @@ export default function ConversionAgentsPage() {
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
+    const [activeTab, setActiveTab] = useState('conversion_sar');
+
+    // Deposit / Receive State
+    const [depositModal, setDepositModal] = useState(false);
+    const [receiveModal, setReceiveModal] = useState(false);
+    const [activeAgent, setActiveAgent] = useState(null);
+    const [actionAmount, setActionAmount] = useState('');
+    const [actionRate, setActionRate] = useState('');
 
     const fetchAll = async () => {
         setLoading(true);
@@ -155,6 +163,39 @@ export default function ConversionAgentsPage() {
             combined.push(...bulkAedInr);
         }
 
+        // 4. Deposits & Receipts
+        const depositsAndReceipts = expenseRecs.filter(e =>
+            (e.category === 'Conversion Deposit' || e.category === 'Conversion Receipt') &&
+            e.distributor_name === agentName
+        ).map(e => {
+            let sar_amt = 0; let aed_amt = 0; let inr_amt = 0; let rate = '';
+
+            if (e.category === 'Conversion Deposit') {
+                if (e.currency === 'SAR') sar_amt = Number(e.amount);
+                else aed_amt = Number(e.amount);
+
+                const rateMatch = e.notes?.match(/@ ([\d.]+)\. Agent owes/);
+                if (rateMatch) rate = rateMatch[1];
+            } else { // Receipt
+                if (e.currency === 'AED') aed_amt = Number(e.amount);
+                else inr_amt = Number(e.amount);
+            }
+
+            return {
+                ...e,
+                $id: e.$id,
+                record_type: e.category === 'Conversion Deposit' ? 'deposit' : 'receipt',
+                date_time: new Date(e.date || e.$createdAt),
+                sar_amount: sar_amt,
+                aed_amount: aed_amt,
+                inr_amount: inr_amt,
+                rate: rate,
+                profit_inr: 0,
+                status: 'completed',
+            };
+        });
+        combined.push(...depositsAndReceipts);
+
         // Sort chronological
         combined.sort((a, b) => a.date_time - b.date_time);
 
@@ -228,6 +269,155 @@ export default function ConversionAgentsPage() {
         } catch (e) { toast.error(e.message); }
     };
 
+    const handleDepositSubmit = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const amtIn = Number(actionAmount);
+            const rate = Number(actionRate);
+            if (!amtIn || !rate) throw new Error('Enter valid amount and rate');
+
+            const incByCur = (cur) => expenseRecs.filter(e => e.type === 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+            const expByCur = (cur) => expenseRecs.filter(e => e.type === 'expense' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+            const sumF = (arr, field) => arr.reduce((a, r) => a + (Number(r[field]) || 0), 0);
+
+            let newLedgerAmt = 0;
+            let expenseCur = '';
+            let balField = '';
+
+            if (activeAgent.type === 'conversion_sar') {
+                const totalSARConverted = sumF(convRecs, 'sar_amount');
+                const balanceSAR = incByCur('SAR') - expByCur('SAR') - totalSARConverted;
+                if (amtIn > (balanceSAR + 0.01)) { // small epsilon for rounding errors
+                    throw new Error(`Insufficient SAR! Only ${Math.max(0, balanceSAR).toLocaleString(undefined, { maximumFractionDigits: 2 })} SAR available.`);
+                }
+
+                newLedgerAmt = amtIn * rate; // SAR * Rate = AED
+                expenseCur = 'SAR';
+                balField = 'aed_balance';
+            } else {
+                const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
+                const balanceAED = incByCur('AED') + totalAEDFromConversions - expByCur('AED');
+                if (amtIn > (balanceAED + 0.01)) { // small epsilon for rounding errors
+                    throw new Error(`Insufficient AED! Only ${Math.max(0, balanceAED).toLocaleString(undefined, { maximumFractionDigits: 2 })} AED available.`);
+                }
+
+                newLedgerAmt = amtIn * rate; // AED * Rate = INR
+                expenseCur = 'AED';
+                balField = 'inr_balance';
+            }
+
+            const currentBal = Number(activeAgent[balField]) || 0;
+
+            await Promise.all([
+                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal + newLedgerAmt }),
+                dbService.createExpense({
+                    title: `Deposit to Conv. Agent — ${activeAgent.name}`,
+                    type: 'expense',
+                    category: 'Conversion Deposit',
+                    amount: amtIn,
+                    currency: expenseCur,
+                    date: new Date().toISOString().split('T')[0],
+                    notes: `Deposited ${amtIn} ${expenseCur} @ ${rate}. Agent owes ${newLedgerAmt.toLocaleString()} ${expenseCur === 'SAR' ? 'AED' : 'INR'}`,
+                    distributor_name: activeAgent.name
+                })
+            ]);
+
+            toast.success(`Deposited ${amtIn} ${expenseCur}`);
+            setDepositModal(false);
+            fetchAll();
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleReceiveSubmit = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const amtRec = Number(actionAmount);
+            if (!amtRec) throw new Error('Enter valid amount');
+
+            let incomeCur = '';
+            let balField = '';
+
+            if (activeAgent.type === 'conversion_sar') {
+                incomeCur = 'AED';
+                balField = 'aed_balance';
+            } else {
+                incomeCur = 'INR';
+                balField = 'inr_balance';
+            }
+
+            const currentBal = Number(activeAgent[balField]) || 0;
+
+            await Promise.all([
+                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal - amtRec }),
+                dbService.createExpense({
+                    title: `Receipt from Conv. Agent — ${activeAgent.name}`,
+                    type: 'income',
+                    category: 'Conversion Receipt',
+                    amount: amtRec,
+                    currency: incomeCur,
+                    date: new Date().toISOString().split('T')[0],
+                    notes: `Received ${amtRec} ${incomeCur} from conversion agent`,
+                    distributor_name: activeAgent.name
+                })
+            ]);
+
+            toast.success(`Received ${amtRec} ${incomeCur}`);
+            setReceiveModal(false);
+            fetchAll();
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteRecord = async (e, r) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this record? This cannot be undone.')) return;
+
+        try {
+            setSaving(true);
+            if (r.record_type === 'tx_sar_aed') {
+                toast.error('To delete a transaction, please go to the Transactions page.');
+                setSaving(false);
+                return;
+            } else if (r.record_type === 'bulk_sar_aed') {
+                await dbService.deleteAedConversion(r.$id);
+            } else if (r.record_type === 'bulk_aed_inr') {
+                await dbService.deleteExpense(r.$id);
+                if (r.inr_expense_id) await dbService.deleteExpense(r.inr_expense_id);
+            } else if (r.record_type === 'deposit' || r.record_type === 'receipt') {
+                const agent = agents.find(a => a.name === r.distributor_name);
+                if (agent) {
+                    let undoBal = 0;
+                    if (r.record_type === 'deposit') {
+                        const match = r.notes?.match(/Agent owes ([\d,.]+) /);
+                        if (match) undoBal = -Number(match[1].replace(/,/g, ''));
+                    } else {
+                        undoBal = Number(r.amount);
+                    }
+                    if (undoBal !== 0 && undoBal && !isNaN(undoBal)) {
+                        const balField = agent.type === 'conversion_sar' ? 'aed_balance' : 'inr_balance';
+                        await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + undoBal });
+                    }
+                }
+                await dbService.deleteExpense(r.$id);
+            }
+            toast.success('Record deleted');
+            fetchAll();
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
         <Layout title="Conversion Agents">
             <div style={{ marginBottom: 16 }}>
@@ -253,84 +443,121 @@ export default function ConversionAgentsPage() {
                     <p>No conversion agents yet. Add one to get started.</p>
                 </div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 16 }}>
-                    {agents.map((a) => {
-                        const s = agentStats(a);
-                        return (
-                            <div key={a.$id} className="card" style={{ padding: 20, border: '1px solid rgba(0,200,150,0.12)', transition: 'transform 0.2s', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                    if (e.target.closest('button')) return; // skip if clicking edit/delete
-                                    setViewingAgent(a);
-                                }}>
-                                {/* Agent header */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-                                    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg,#f59e0b,#ef4444)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
-                                        {a.name?.[0]?.toUpperCase()}
-                                    </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 700, fontSize: 16 }}>{a.name}</div>
-                                        <div style={{ marginTop: 4 }}>{convTypeBadge(a.type)}</div>
-                                        {a.phone && (
-                                            <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                                                <Phone size={11} /> {a.phone}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div style={{ display: 'flex', gap: 6 }}>
-                                        <button
-                                            className="btn btn-outline btn-sm btn-icon"
-                                            title="View History"
-                                            onClick={() => setViewingAgent(a)}
-                                        >
-                                            <List size={13} />
-                                        </button>
-                                        <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
-                                        <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
-                                    </div>
-                                </div>
+                <div className="card">
+                    <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'center' }}>
+                        <div className="flex gap-4">
+                            <button
+                                style={{
+                                    fontSize: 18,
+                                    padding: '10px 28px',
+                                    borderRadius: '12px',
+                                    border: activeTab === 'conversion_sar' ? '1px solid var(--brand-accent)' : '1px solid var(--border-color)',
+                                    background: activeTab === 'conversion_sar' ? 'var(--brand-accent)' : 'rgba(255,255,255,0.05)',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onClick={() => setActiveTab('conversion_sar')}
+                            >
+                                SAR → AED Agents
+                            </button>
+                            <button
+                                style={{
+                                    fontSize: 18,
+                                    padding: '10px 28px',
+                                    borderRadius: '12px',
+                                    border: activeTab === 'conversion_aed' ? '1px solid var(--brand-accent)' : '1px solid var(--border-color)',
+                                    background: activeTab === 'conversion_aed' ? 'var(--brand-accent)' : 'rgba(255,255,255,0.05)',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onClick={() => setActiveTab('conversion_aed')}
+                            >
+                                AED → INR Agents
+                            </button>
+                        </div>
+                    </div>
+                    <div className="table-wrapper">
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th style={{ width: 40 }}>#</th>
+                                    <th>Name</th>
+                                    <th>Phone</th>
+                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total SAR Sent' : 'Total AED Sent'}</th>
+                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total AED Got' : 'Total INR Got'}</th>
+                                    <th style={{ textAlign: 'right' }}>Net Profit (INR)</th>
+                                    <th style={{ textAlign: 'right' }}>Balance Owed To Us</th>
+                                    <th style={{ textAlign: 'center' }}>Ledger Operations</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {agents.filter(a => a.type === activeTab).map((a, i) => {
+                                    const s = agentStats(a);
+                                    const bal = activeTab === 'conversion_sar' ? (a.aed_balance || 0) : (a.inr_balance || 0);
+                                    const balCur = activeTab === 'conversion_sar' ? 'AED' : 'INR';
 
-                                {/* Stats row */}
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'AED Sent' : 'SAR Sent'}</div>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                                            <TrendingUp size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff' }} />
-                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff', fontSize: 15 }}>
-                                                {a.type === 'conversion_aed' ? s.aedSent.toLocaleString() : s.sarSent.toLocaleString()}
-                                            </span>
-                                        </div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.count} conversion{s.count !== 1 ? 's' : ''}</div>
-                                    </div>
-                                    <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'INR Got' : 'AED Got'}</div>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                                            <Banknote size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }} />
-                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)', fontSize: 15 }}>
-                                                {a.type === 'conversion_aed' ? s.inrGot.toLocaleString() : s.aedGot.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                                            </span>
-                                        </div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{a.type === 'conversion_aed' ? 'INR' : 'AED'}</div>
-                                    </div>
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Profit</div>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                                            <Wallet size={13} style={{ color: s.profit >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }} />
-                                            <span style={{ fontWeight: 700, color: s.profit >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontSize: 15 }}>
-                                                ₹{Math.abs(s.profit).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                            </span>
-                                        </div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>INR net</div>
-                                    </div>
-                                </div>
-
-                                {a.notes && (
-                                    <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.03)', borderRadius: 6, padding: '6px 10px' }}>
-                                        {a.notes}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                                    return (
+                                        <tr key={a.$id}>
+                                            <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 600 }}>{a.name}</div>
+                                                {a.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.notes}</div>}
+                                            </td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600, color: activeTab === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff' }}>
+                                                {activeTab === 'conversion_aed' ? s.aedSent.toLocaleString() : s.sarSent.toLocaleString()}
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600, color: activeTab === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
+                                                {activeTab === 'conversion_aed' ? s.inrGot.toLocaleString('en-IN') : s.aedGot.toLocaleString()}
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600, color: s.profit >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                                ₹{s.profit.toLocaleString('en-IN')}
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: bal >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                                {bal.toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setDepositModal(true); }}>Deposit</button>
+                                                    <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setReceiveModal(true); }}>Receive</button>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                                    <button className="btn btn-outline btn-sm btn-icon" title="View History" onClick={() => setViewingAgent(a)}><List size={13} /></button>
+                                                    <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
+                                                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: activeTab === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff' }}>
+                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_aed' ? agentStats(a).aedSent : agentStats(a).sarSent), 0).toLocaleString()}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: activeTab === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
+                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_aed' ? agentStats(a).inrGot : agentStats(a).aedGot), 0).toLocaleString(activeTab === 'conversion_aed' ? 'en-IN' : undefined)}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                        ₹{agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + agentStats(a).profit, 0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.aed_balance || 0) : (a.inr_balance || 0)), 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'AED' : 'INR'}</span>
+                                    </td>
+                                    <td colSpan={2}></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                 </div>
             )}
 
@@ -439,13 +666,17 @@ export default function ConversionAgentsPage() {
                                                             <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {r.notes || r.client_name || '—'}
                                                             </td>
-                                                            <td style={{ textAlign: 'right' }}>
-                                                                <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                            <td style={{ textAlign: 'center' }}>
+                                                                <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
                                                                     if (r.record_type === 'tx_sar_aed') window.open(`/transactions?q=${r.tx_id}`, '_blank');
                                                                     else if (r.record_type === 'bulk_aed_inr') window.open(`/expenses`, '_blank');
-                                                                    else toast.error('Bulk SAR->AED edits not yet implemented here'); // could add a modal if needed
+                                                                    else if (r.record_type === 'deposit' || r.record_type === 'receipt') window.open(`/reports`, '_blank');
+                                                                    else toast.error('Bulk SAR->AED edits not yet implemented here');
                                                                 }}>
                                                                     <Pencil size={12} />
+                                                                </button>
+                                                                <button className="btn btn-danger btn-sm btn-icon" onClick={(e) => handleDeleteRecord(e, r)} title="Delete Record">
+                                                                    <Trash2 size={12} />
                                                                 </button>
                                                             </td>
                                                         </tr>
@@ -534,9 +765,77 @@ export default function ConversionAgentsPage() {
                             </div>
                         </form>
                     </div>
-                </div >
-            )
-            }
-        </Layout >
+                </div>
+            )}
+
+            {/* Deposit Modal */}
+            {depositModal && activeAgent && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDepositModal(false)}>
+                    <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Deposit to {activeAgent.name}</h3>
+                            <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setDepositModal(false)}><X size={20} /></button>
+                        </div>
+                        <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleDepositSubmit}>
+                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                                This will debit <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> from our local ledger
+                                and increase {activeAgent.name}'s owed balance.
+                            </p>
+                            <div className="form-group">
+                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Deposit Amount ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
+                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                    value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Fixed Exchange Rate</label>
+                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                    value={actionRate} onChange={e => setActionRate(e.target.value)} />
+                            </div>
+                            {actionAmount && actionRate && (
+                                <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
+                                    Agent will owe us: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}
+                                </div>
+                            )}
+                            <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                                <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
+                                    {saving ? 'Processing...' : 'Confirm Deposit'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Receive Modal */}
+            {receiveModal && activeAgent && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setReceiveModal(false)}>
+                    <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Receive from {activeAgent.name}</h3>
+                            <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setReceiveModal(false)}><X size={20} /></button>
+                        </div>
+                        <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleReceiveSubmit}>
+                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+                                This will credit <b>{activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}</b> to our local ledger
+                                and decrease {activeAgent.name}'s owed balance. (If we receive more than they owe, their balance will go negative indicating we owe them.)
+                            </p>
+                            <div className="form-group">
+                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Amount Received ({activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'})</label>
+                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                    value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
+                            </div>
+                            <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                                <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setReceiveModal(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
+                                    {saving ? 'Processing...' : 'Confirm Receipt'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+        </Layout>
     );
 }

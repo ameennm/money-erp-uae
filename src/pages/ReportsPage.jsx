@@ -348,13 +348,29 @@ export default function ReportsPage() {
                         <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search particulars..."
                             value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
-                    <select className="form-select" style={{ maxWidth: 140, fontSize: 13, padding: '6px 10px' }}
-                        value={currencyFilter} onChange={e => setCurrencyFilter(e.target.value)}>
-                        <option value="All">All Currencies</option>
-                        <option value="SAR">SAR Only</option>
-                        <option value="AED">AED Only</option>
-                        <option value="INR">INR Only</option>
-                    </select>
+                    <div className="flex gap-1" style={{ background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 8 }}>
+                        {['All', 'SAR', 'AED', 'INR'].map(c => (
+                            <button
+                                key={c}
+                                onClick={() => setCurrencyFilter(c)}
+                                style={{
+                                    padding: '4px 12px',
+                                    fontSize: 12,
+                                    fontWeight: currencyFilter === c ? 700 : 500,
+                                    borderRadius: 6,
+                                    border: 'none',
+                                    color: currencyFilter === c ? '#fff' : 'var(--text-muted)',
+                                    background: currencyFilter === c
+                                        ? (c === 'SAR' ? '#4a9eff' : c === 'AED' ? 'var(--brand-gold)' : c === 'INR' ? '#a78bfa' : 'var(--brand-accent)')
+                                        : 'transparent',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                            >
+                                {c}
+                            </button>
+                        ))}
+                    </div>
                     <button className="btn btn-outline" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
                         <Download size={16} /> Excel
                     </button>

@@ -271,14 +271,6 @@ export default function DashboardPage() {
                         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)' }}>
                             Financial Summary — {dateRange}
                         </div>
-                        <div className="flex gap-2">
-                            <button className="btn btn-accent btn-sm" onClick={() => setConvertModal(true)}>
-                                <ArrowLeftRight size={14} /> SAR → AED
-                            </button>
-                            <button className="btn btn-sm" style={{ background: '#a78bfa', color: '#fff', border: 'none' }} onClick={() => setInrConvertModal(true)}>
-                                <ArrowLeftRight size={14} /> AED → INR
-                            </button>
-                        </div>
                     </div>
                     <div className="stats-grid" style={{ marginBottom: 28 }}>
                         {/* Total SAR Balance */}
