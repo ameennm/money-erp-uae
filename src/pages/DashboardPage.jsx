@@ -423,7 +423,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': 'var(--brand-gold)' }}>
                     <div className="stat-value">{totalAEDCollected.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    <div className="stat-label">Total AED Collected</div>
+                    <div className="stat-label">Total AED</div>
                 </div>
                 <div className="stat-card" style={{ '--accent-bar': 'var(--status-completed)' }}>
                     <div className="stat-value">{completed.length}</div>

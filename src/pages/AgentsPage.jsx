@@ -215,19 +215,19 @@ export default function AgentsPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
                     {/* Total Distributed */}
                     <div className="card" style={{ padding: '14px 18px', background: 'rgba(74,158,255,0.05)', border: '1px solid rgba(74,158,255,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Distributed</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</div>
                         <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
                         {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
                     </div>
                     {/* Total Paid to Us */}
                     <div className="card" style={{ padding: '14px 18px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Agent Paid to Us</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Paid</div>
                         <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-accent)' }}>{totalPaidSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
                         {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-accent)', marginTop: 2 }}>{totalPaidAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
                     </div>
                     {/* Total Owed to Us */}
                     <div className="card" style={{ padding: '14px 18px', background: 'rgba(245,166,35,0.05)', border: '1px solid rgba(245,166,35,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total Agent Owed Us</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Balance</div>
                         <div style={{ fontSize: 17, fontWeight: 800, color: totalSarOwed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>{totalSarOwed.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
                         {totalAedOwed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalAedOwed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
                     </div>
@@ -254,9 +254,9 @@ export default function AgentsPage() {
                                     <th>Phone</th>
                                     <th>Location</th>
                                     <th>Currency</th>
-                                    <th style={{ textAlign: 'right' }}>Total Distributed</th>
-                                    <th style={{ textAlign: 'right' }}>Paid to Us</th>
-                                    <th style={{ textAlign: 'right' }}>Owed to Us</th>
+                                    <th style={{ textAlign: 'right' }}>Total</th>
+                                    <th style={{ textAlign: 'right' }}>Paid</th>
+                                    <th style={{ textAlign: 'right' }}>Balance</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -342,6 +342,24 @@ export default function AgentsPage() {
                                     );
                                 })}
                             </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                        <div style={{ color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {totalCollectedAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                        <div style={{ color: totalPaidSar > 0 ? 'var(--brand-accent)' : 'var(--text-muted)' }}>{totalPaidSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {totalPaidAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalPaidAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                        <div style={{ color: totalSarOwed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>{totalSarOwed.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {totalAedOwed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalAedOwed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                    </td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>
@@ -456,7 +474,7 @@ export default function AgentsPage() {
                                                 </div>
                                             </div>
                                             <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.06)', border: '1px solid rgba(0,200,150,0.18)' }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>They Paid to Us</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Paid</div>
                                                 <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
                                                     {paidToUsTotal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
                                                 </div>
@@ -468,7 +486,7 @@ export default function AgentsPage() {
                                                 </div>
                                             </div>
                                             <div className="card" style={{ padding: '14px', background: cur === 'AED' ? 'rgba(245,166,35,0.07)' : 'rgba(74,158,255,0.07)', border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.2)' : 'rgba(74,158,255,0.2)'}` }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total Owed to Us</div>
+                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Balance</div>
                                                 <div style={{ fontSize: '18px', fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
                                                     {owedBal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
                                                 </div>
@@ -487,8 +505,8 @@ export default function AgentsPage() {
                                                 <th style={{ textAlign: 'right' }}>Conv. Rate<br /><span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>per 1000 INR</span></th>
                                                 <th style={{ textAlign: 'right' }}>INR to Distribute</th>
                                                 <th style={{ textAlign: 'right' }}>SAR We Got</th>
-                                                <th style={{ textAlign: 'right' }}>They Paid Amount</th>
-                                                <th style={{ textAlign: 'right' }}>They Owed Us</th>
+                                                <th style={{ textAlign: 'right' }}>Paid</th>
+                                                <th style={{ textAlign: 'right' }}>Balance</th>
                                             </tr>
                                         </thead>
                                         <tbody>

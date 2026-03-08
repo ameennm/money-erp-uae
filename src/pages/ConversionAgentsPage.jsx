@@ -177,20 +177,20 @@ export default function ConversionAgentsPage() {
                                 {/* Stats row */}
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
                                     <div style={{ textAlign: 'center' }}>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>SAR Sent</div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'AED Sent' : 'SAR Sent'}</div>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                                            <TrendingUp size={13} style={{ color: '#4a9eff' }} />
-                                            <span style={{ fontWeight: 700, color: '#4a9eff', fontSize: 15 }}>{s.sarSent.toLocaleString()}</span>
+                                            <TrendingUp size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff' }} />
+                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff', fontSize: 15 }}>{s.sarSent.toLocaleString()}</span>
                                         </div>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.count} conversion{s.count !== 1 ? 's' : ''}</div>
                                     </div>
                                     <div style={{ textAlign: 'center', borderLeft: '1px solid var(--border-color)', borderRight: '1px solid var(--border-color)' }}>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>AED Got</div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'INR Got' : 'AED Got'}</div>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                                            <Banknote size={13} style={{ color: 'var(--brand-gold)' }} />
-                                            <span style={{ fontWeight: 700, color: 'var(--brand-gold)', fontSize: 15 }}>{s.aedGot.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                                            <Banknote size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }} />
+                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)', fontSize: 15 }}>{s.aedGot.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                                         </div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>AED</div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{a.type === 'conversion_aed' ? 'INR' : 'AED'}</div>
                                     </div>
                                     <div style={{ textAlign: 'center' }}>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Profit</div>
@@ -259,7 +259,7 @@ export default function ConversionAgentsPage() {
                                 <div>
                                     <h3 className="modal-title">Conversion Ledger: {viewingAgent.name}</h3>
                                     <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        SAR → AED conversions handled by this agent
+                                        {viewingAgent.type === 'conversion_aed' ? 'AED → INR' : 'SAR → AED'} conversions handled by this agent
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -293,10 +293,10 @@ export default function ConversionAgentsPage() {
                                             <tr>
                                                 <th style={{ width: 40 }}>#</th>
                                                 <th>Date</th>
-                                                <th style={{ textAlign: 'right' }}>Sent (SAR)</th>
+                                                <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'Sent (AED)' : 'Sent (SAR)'}</th>
                                                 <th style={{ textAlign: 'center' }}>Rate</th>
-                                                <th style={{ textAlign: 'right' }}>Received (AED)</th>
-                                                <th style={{ textAlign: 'right' }}>AED Balance</th>
+                                                <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'Received (INR)' : 'Received (AED)'}</th>
+                                                <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'INR Balance' : 'AED Balance'}</th>
                                                 <th style={{ textAlign: 'right' }}>Profit (INR)</th>
                                                 <th>Notes</th>
                                             </tr>
@@ -305,24 +305,52 @@ export default function ConversionAgentsPage() {
                                             {filteredTxs.length === 0 ? (
                                                 <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No conversion records found.</td></tr>
                                             ) : (
-                                                filteredTxs.map((r, idx) => (
-                                                    <tr key={r.$id}>
-                                                        <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                                        <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                                                            <div className="flex items-center gap-1"><Calendar size={12} /> {r.date}</div>
-                                                        </td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{Number(r.sar_amount).toLocaleString()}</td>
-                                                        <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>{r.sar_rate}</td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-gold)' }}>+{Number(r.aed_amount).toLocaleString()}</td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>{Number(r.running_aed).toLocaleString()}</td>
-                                                        <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
-                                                            {r.profit_inr >= 0 ? '+' : ''}₹{Number(r.profit_inr).toLocaleString('en-IN')}
-                                                        </td>
-                                                        <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
-                                                    </tr>
-                                                ))
+                                                filteredTxs.map((r, idx) => {
+                                                    const isAedToInr = viewingAgent.type === 'conversion_aed';
+                                                    return (
+                                                        <tr key={r.$id}>
+                                                            <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                            <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                                                <div className="flex items-center gap-1"><Calendar size={12} /> {r.date}</div>
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--brand-gold)' : undefined }}>
+                                                                {isAedToInr ? Number(r.aed_amount).toLocaleString() : Number(r.sar_amount).toLocaleString()}
+                                                            </td>
+                                                            <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                                                {isAedToInr ? r.aed_to_inr_rate || '—' : r.sar_rate}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
+                                                                +{isAedToInr ? Number(r.inr_amount || 0).toLocaleString('en-IN') : Number(r.aed_amount).toLocaleString()}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                                                {isAedToInr ? Number(r.running_inr || 0).toLocaleString('en-IN') : Number(r.running_aed).toLocaleString()}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
+                                                                {r.profit_inr >= 0 ? '+' : ''}₹{Number(r.profit_inr).toLocaleString('en-IN')}
+                                                            </td>
+                                                            <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
+                                                        </tr>
+                                                    );
+                                                })
                                             )}
                                         </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--brand-gold)' : undefined }}>
+                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.aed_amount : r.sar_amount) || 0), 0).toLocaleString()}
+                                                </td>
+                                                <td></td>
+                                                <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
+                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.inr_amount || 0 : r.aed_amount) || 0), 0).toLocaleString()}
+                                                </td>
+                                                <td></td>
+                                                <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
+                                                    ₹{filteredTxs.reduce((a, r) => a + (Number(r.profit_inr) || 0), 0).toLocaleString('en-IN')}
+                                                </td>
+                                                <td></td>
+                                            </tr>
+                                        </tfoot>
                                     </table>
                                 </div>
                             </div>
