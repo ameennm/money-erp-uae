@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { dbService } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
@@ -98,6 +98,7 @@ export default function TransactionsPage() {
     const [editTx, setEditTx] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
+    const isSavingRef = useRef(false);
     const [copiedId, setCopiedId] = useState(null);
 
     // Context-specific Modals
@@ -145,6 +146,8 @@ export default function TransactionsPage() {
 
     const handleSave = async (e) => {
         e.preventDefault();
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
         setSaving(true);
         try {
             const payload = { ...form };
@@ -176,6 +179,7 @@ export default function TransactionsPage() {
                 }
             } else {
                 if (!payload.distributor_id) {
+                    isSavingRef.current = false;
                     setSaving(false);
                     return toast.error('Please select a Distributor');
                 }
@@ -185,6 +189,7 @@ export default function TransactionsPage() {
                 const minRate = currency === 'AED' ? (settings.min_aed_rate || 0) : (settings.min_sar_rate || 0);
                 const collRate = parseFloat(form.collection_rate) || 0;
                 if (minRate > 0 && collRate < minRate) {
+                    isSavingRef.current = false;
                     setSaving(false);
                     return toast.error(
                         `This amount can't be entered. Please check the rate and try again.`,
@@ -208,11 +213,12 @@ export default function TransactionsPage() {
                     const currentBal = round2(dist.inr_balance || 0);
                     const needed = round2(payload.inr_requested);
                     if (needed > currentBal) {
-                        setSaving(false);
-                        return toast.error(
-                            `Insufficient balance! ${dist.name} has ₹${currentBal.toLocaleString('en-IN')} but ₹${needed.toLocaleString('en-IN')} is needed. Deposit ₹${(needed - currentBal).toLocaleString('en-IN')} more.`,
-                            { duration: 5000 }
-                        );
+                        const confirmMsg = `${dist.name} only has ₹${currentBal.toLocaleString('en-IN')} available.\n\nIf you proceed, ₹${needed.toLocaleString('en-IN')} will be taken, resulting in a negative balance.\n\nDo you want to continue?`;
+                        if (!window.confirm(confirmMsg)) {
+                            isSavingRef.current = false;
+                            setSaving(false);
+                            return;
+                        }
                     }
                     const newBal = round2(currentBal - needed);
                     await dbService.updateAgent(dist.$id, { inr_balance: newBal });
@@ -238,7 +244,10 @@ export default function TransactionsPage() {
             setModal(false);
             fetchAll();
         } catch (e) { toast.error(e.message); }
-        finally { setSaving(false); }
+        finally {
+            isSavingRef.current = false;
+            setSaving(false);
+        }
     };
 
     const handleApproveEdit = async (tx) => {
@@ -251,7 +260,9 @@ export default function TransactionsPage() {
 
     const handleConversion = async (e) => {
         e.preventDefault();
+        if (isSavingRef.current) return;
         if (!form.conversion_agent_id) return toast.error('Select a conversion agent');
+        isSavingRef.current = true;
         setSaving(true);
         try {
             const sarRate = parseFloat(form.sar_to_aed_rate);
@@ -268,11 +279,16 @@ export default function TransactionsPage() {
             setConvertModal(false);
             fetchAll();
         } catch (e) { toast.error(e.message); }
-        finally { setSaving(false); }
+        finally {
+            isSavingRef.current = false;
+            setSaving(false);
+        }
     };
 
     const handleDistribution = async (e) => {
         e.preventDefault();
+        if (isSavingRef.current) return;
+        isSavingRef.current = true;
         setSaving(true);
         try {
             const inrRate = parseFloat(form.aed_to_inr_rate);
@@ -285,7 +301,16 @@ export default function TransactionsPage() {
             if (dist) {
                 const diff = round2(inrDist - (activeTx.inr_requested || 0));
                 if (diff !== 0) {
-                    const newBal = round2((Number(dist.inr_balance) || 0) - diff);
+                    const currentBal = round2(dist.inr_balance || 0);
+                    if (diff > currentBal) {
+                        const confirmMsg = `${dist.name} only has ₹${currentBal.toLocaleString('en-IN')} available.\n\nIf you proceed, the extra ₹${diff.toLocaleString('en-IN')} will result in a negative balance.\n\nDo you want to continue?`;
+                        if (!window.confirm(confirmMsg)) {
+                            isSavingRef.current = false;
+                            setSaving(false);
+                            return;
+                        }
+                    }
+                    const newBal = round2(currentBal - diff);
                     await dbService.updateAgent(dist.$id, { inr_balance: newBal });
                 }
             }
@@ -302,7 +327,10 @@ export default function TransactionsPage() {
             setDistributeModal(false);
             fetchAll();
         } catch (e) { toast.error(e.message); }
-        finally { setSaving(false); }
+        finally {
+            isSavingRef.current = false;
+            setSaving(false);
+        }
     };
 
     const openEdit = (tx) => {

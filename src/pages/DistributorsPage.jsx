@@ -278,7 +278,7 @@ export default function DistributorsPage() {
                                             <td>{distTxs.length} txs</td>
                                             <td style={{ fontWeight: 600, color: '#a78bfa' }}>₹{totalINR.toLocaleString('en-IN')}</td>
                                             <td style={{ fontWeight: 700, color: dist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                                ₹{Number(dist.inr_balance || 0).toLocaleString('en-IN')}
+                                                {dist.inr_balance < 0 ? '-' : ''}₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
                                             </td>
                                             <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{dist.notes || '—'}</td>
                                             <td>
@@ -315,8 +315,8 @@ export default function DistributorsPage() {
                                     <td style={{ fontWeight: 800, color: '#a78bfa' }}>
                                         ₹{distributors.reduce((sum, d) => sum + getDistTxs(d.$id).reduce((s, t) => s + (Number(t.actual_inr_distributed) || 0), 0), 0).toLocaleString('en-IN')}
                                     </td>
-                                    <td style={{ fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        ₹{distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0).toLocaleString('en-IN')}
+                                    <td style={{ fontWeight: 800, color: distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0) >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                        {distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0) < 0 ? '-' : ''}₹{Math.abs(distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0)).toLocaleString('en-IN')}
                                     </td>
                                     <td colSpan={2}></td>
                                 </tr>
@@ -453,8 +453,8 @@ export default function DistributorsPage() {
                                     {/* Current Balance — matches outside table exactly */}
                                     <div className="card" style={{ padding: '16px', background: 'rgba(0,200,150,0.07)', border: '2px solid rgba(0,200,150,0.3)' }}>
                                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Current Balance (DB)</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                            ₹{round2(viewingDist.inr_balance || 0).toLocaleString('en-IN')}
+                                        <div style={{ fontSize: '20px', fontWeight: 800, color: viewingDist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                            {viewingDist.inr_balance < 0 ? '-' : ''}₹{Math.abs(round2(viewingDist.inr_balance || 0)).toLocaleString('en-IN')}
                                         </div>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Same as outside table</div>
                                     </div>
@@ -520,8 +520,8 @@ export default function DistributorsPage() {
                                                         <td style={{ textAlign: 'right', fontWeight: ev.amount < 0 ? 800 : 500, color: ev.amount < 0 ? 'var(--status-failed)' : 'inherit' }}>
                                                             {ev.amount < 0 ? `-₹${Math.abs(ev.amount).toLocaleString('en-IN')}` : '—'}
                                                         </td>
-                                                        <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                                            ₹{Number(ev.running_balance).toLocaleString('en-IN')}
+                                                        <td style={{ textAlign: 'right', fontWeight: 800, color: ev.running_balance >= 0 ? 'inherit' : 'var(--status-failed)' }}>
+                                                            {ev.running_balance < 0 ? '-' : ''}₹{Math.abs(Number(ev.running_balance)).toLocaleString('en-IN')}
                                                         </td>
                                                     </tr>
                                                 ))
