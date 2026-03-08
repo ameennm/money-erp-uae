@@ -185,22 +185,19 @@ export default function DashboardPage() {
 
     // Income & Expenses by currency
     const incByCur = (cur) => expenseRecs.filter(e => e.type === 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const expByCur = (cur) => expenseRecs.filter(e => e.type !== 'income' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expByCur = (cur) => expenseRecs.filter(e => e.type === 'expense' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
-    // SAR Balance = only SAR we've actually received (agent payments recorded as income)
-    //              minus SAR already bulk-converted to AED
-    // NOTE: totalSARCollected is NOT included here — agents physically hold that until they pay us
+    // SAR Balance = SAR Income (agent payments) minus SAR Expenses and SAR->AED Conversions
     const totalSARCollected = sumF(fTxs.filter(t => t.collected_currency === 'SAR'), 'collected_amount');
     const totalSARConverted = sumF(convRecs, 'sar_amount');
-    const balanceSAR = incByCur('SAR') - totalSARConverted - expByCur('SAR');
+    let balanceSAR = incByCur('SAR') - expByCur('SAR') - totalSARConverted;
+    if (Math.abs(balanceSAR) < 0.001) balanceSAR = 0;
 
-    // AED Balance = AED from SAR conversions + AED actually received from agents (agent payments)
-    //              + other AED income - AED expenses - AED converted to INR
-    // NOTE: totalAEDCollected from transactions NOT included — agents physically hold it until they pay us
+    // AED Balance = AED Income + AED gained from SAR conversions minus AED Expenses
     const totalAEDCollected = sumF(fTxs.filter(t => t.collected_currency === 'AED'), 'collected_amount');
     const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
-    const totalAEDConvertedToINR = expenseRecs.filter(e => e.category === 'AED→INR Conversion' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const balanceAED = totalAEDFromConversions + incByCur('AED') - expByCur('AED') - totalAEDConvertedToINR;
+    let balanceAED = incByCur('AED') + totalAEDFromConversions - expByCur('AED');
+    if (Math.abs(balanceAED) < 0.001) balanceAED = 0;
 
     // INR Balance = total INR received (deposits) minus general expenses minus INR already paid out to clients
     const inrGeneralExpenses = expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer').reduce((a, e) => a + (Number(e.amount) || 0), 0);

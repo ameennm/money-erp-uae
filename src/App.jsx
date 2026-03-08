@@ -12,6 +12,7 @@ import ConversionAgentsPage from './pages/ConversionAgentsPage';
 import CreditsPage from './pages/CreditsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
+import ActivityLogsPage from './pages/ActivityLogsPage';
 
 export default function App() {
   return (
@@ -60,6 +61,9 @@ export default function App() {
           } />
           <Route path="/expenses" element={
             <ProtectedRoute roles={['admin', 'collector']}><ExpensesPage /></ProtectedRoute>
+          } />
+          <Route path="/activity-logs" element={
+            <ProtectedRoute roles={['admin', 'collector']}><ActivityLogsPage /></ProtectedRoute>
           } />
           <Route path="/reports" element={
             <ProtectedRoute roles={['admin', 'collector']}><ReportsPage /></ProtectedRoute>

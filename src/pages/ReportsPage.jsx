@@ -34,12 +34,12 @@ export default function ReportsPage() {
 
     const [txs, setTxs] = useState([]);
     const [expenses, setExpenses] = useState([]);
+    const [aedConversions, setAedConversions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dateRange, setDateRange] = useState('All Time');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [search, setSearch] = useState('');
-    const [showTx, setShowTx] = useState(true);
     const [showIncome, setShowIncome] = useState(true);
     const [showExpense, setShowExpense] = useState(true);
     const [currencyFilter, setCurrencyFilter] = useState('All');
@@ -47,12 +47,14 @@ export default function ReportsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ex] = await Promise.all([
+            const [t, ex, ac] = await Promise.all([
                 dbService.listTransactions(),
                 dbService.listExpenses(),
+                dbService.listAedConversions(),
             ]);
             setTxs(t.documents);
             setExpenses(ex.documents);
+            setAedConversions(ac.documents);
         } catch (e) {
             toast.error('Failed to load data: ' + e.message);
         } finally {
@@ -65,39 +67,23 @@ export default function ReportsPage() {
     // Build unified ledger entries
     const allEntries = [];
 
-    if (showTx) {
-        txs.forEach(tx => {
-            // Collection (Credit in SAR/AED)
+    // Distribution (Debit in INR) - money leaving the system to customers!
+    txs.forEach(tx => {
+        if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
             allEntries.push({
                 _type: 'transaction',
-                _date: tx.$createdAt,
-                _id: tx.$id + '_col',
-                particular: `${tx.client_name} — Collection`,
+                _date: tx.$updatedAt || tx.$createdAt,
+                _id: tx.$id + '_dist',
+                particular: `${tx.client_name} — Distribution`,
                 txId: tx.tx_id || '',
-                currency: tx.collected_currency || '',
-                credit: tx.collected_amount || 0,
-                debit: 0,
-                agent: tx.collection_agent_name || '',
+                currency: 'INR',
+                credit: 0,
+                debit: Number(tx.actual_inr_distributed),
+                agent: tx.distributor_name || '',
                 notes: tx.notes || '',
             });
-
-            // Distribution (Debit in INR) - money leaving the system!
-            if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
-                allEntries.push({
-                    _type: 'transaction',
-                    _date: tx.$updatedAt || tx.$createdAt,
-                    _id: tx.$id + '_dist',
-                    particular: `${tx.client_name} — Distribution`,
-                    txId: tx.tx_id || '',
-                    currency: 'INR',
-                    credit: 0,
-                    debit: Number(tx.actual_inr_distributed),
-                    agent: tx.distributor_name || '',
-                    notes: tx.notes || '',
-                });
-            }
-        });
-    }
+        }
+    });
 
     if (showIncome) {
         expenses.filter(e => e.type === 'income').forEach(e => {
@@ -134,6 +120,37 @@ export default function ReportsPage() {
                     notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
                 });
             });
+
+        // Show SAR -> AED Conversions in the ledger
+        aedConversions.forEach(c => {
+            // SAR Out (Debit)
+            allEntries.push({
+                _type: 'expense',
+                _date: c.$createdAt || c.date,
+                _id: c.$id + '_sar',
+                particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
+                txId: '',
+                currency: 'SAR',
+                credit: 0,
+                debit: Number(c.sar_amount) || 0,
+                agent: c.conversion_agent_name || '',
+                notes: `Rate: ${c.sar_rate || ''}`,
+            });
+
+            // AED In (Credit)
+            allEntries.push({
+                _type: 'income',
+                _date: c.$createdAt || c.date,
+                _id: c.$id + '_aed',
+                particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
+                txId: '',
+                currency: 'AED',
+                credit: Number(c.aed_amount) || 0,
+                debit: 0,
+                agent: c.conversion_agent_name || '',
+                notes: `Converted from ${Number(c.sar_amount) || 0} SAR`,
+            });
+        });
     }
 
     // Sort by date ascending for ledger
@@ -157,9 +174,11 @@ export default function ReportsPage() {
     const totals = {};
     displayCurrencies.forEach(cur => {
         const curEntries = filtered.filter(e => e.currency === cur);
-        const totalCredit = curEntries.reduce((a, e) => a + e.credit, 0);
-        const totalDebit = curEntries.reduce((a, e) => a + e.debit, 0);
-        totals[cur] = { credit: totalCredit, debit: totalDebit, balance: totalCredit - totalDebit };
+        const totalCredit = curEntries.reduce((a, e) => a + Number(e.credit || 0), 0);
+        const totalDebit = curEntries.reduce((a, e) => a + Number(e.debit || 0), 0);
+        let bal = totalCredit - totalDebit;
+        if (Math.abs(bal) < 0.001) bal = 0; // Fix -0 issue
+        totals[cur] = { credit: totalCredit, debit: totalDebit, balance: bal };
     });
 
     // Running balance per currency
@@ -167,7 +186,8 @@ export default function ReportsPage() {
     const entriesWithBalance = filtered.map(entry => {
         const cur = entry.currency;
         if (cur && runningBal[cur] !== undefined) {
-            runningBal[cur] += entry.credit - entry.debit;
+            runningBal[cur] += Number(entry.credit || 0) - Number(entry.debit || 0);
+            if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
         }
         return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
     });
@@ -311,11 +331,6 @@ export default function ReportsPage() {
             {/* ── Type Checkboxes + Search + Download ─────────────── */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div className="flex gap-4 flex-wrap" style={{ fontSize: 13 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showTx ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
-                        <input type="checkbox" checked={showTx} onChange={e => setShowTx(e.target.checked)}
-                            style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
-                        Transactions
-                    </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showIncome ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
                         <input type="checkbox" checked={showIncome} onChange={e => setShowIncome(e.target.checked)}
                             style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />

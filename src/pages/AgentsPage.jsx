@@ -33,6 +33,7 @@ const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', t
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
     const [txs, setTxs] = useState([]);
+    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -49,12 +50,14 @@ export default function AgentsPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const [ar, tr] = await Promise.all([
+            const [ar, tr, ex] = await Promise.all([
                 dbService.listAgents([Query.equal('type', 'collection')]),
                 dbService.listTransactions(),
+                dbService.listExpenses(),
             ]);
             setAgents(ar.documents);
             setTxs(tr.documents);
+            setExpenseRecs(ex.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -148,14 +151,32 @@ export default function AgentsPage() {
     };
 
     // Build agent ledger with running per-row paid/owed
-    const getAgentTxs = (agentId) => {
-        let agentRecords = txs.filter(t => t.collection_agent_id === agentId);
-        agentRecords.sort((a, b) => new Date(a.$createdAt) - new Date(b.$createdAt));
+    // Build agent ledger with running per-row paid/owed
+    const getAgentTxs = (agentId, agentName) => {
+        let agentRecords = txs.filter(t => t.collection_agent_id === agentId).map(t => ({
+            ...t,
+            record_type: 'collection',
+            date_time: new Date(t.$createdAt)
+        }));
+
+        let paymentRecords = expenseRecs.filter(e => e.category === 'Agent Payment' && e.title.includes(agentName)).map(e => ({
+            ...e,
+            record_type: 'payment',
+            date_time: new Date(e.$createdAt || e.date)
+        }));
+
+        let combined = [...agentRecords, ...paymentRecords];
+        combined.sort((a, b) => a.date_time - b.date_time);
 
         let cumulativeCollected = 0;
-        return agentRecords.map(t => {
-            cumulativeCollected += Number(t.collected_amount) || 0;
-            return { ...t, cumulative_collected: cumulativeCollected };
+        let cumulativePaid = 0;
+        return combined.map(t => {
+            if (t.record_type === 'collection') {
+                cumulativeCollected += Number(t.collected_amount) || 0;
+            } else {
+                cumulativePaid += Number(t.amount) || 0;
+            }
+            return { ...t, cumulative_collected: cumulativeCollected, cumulative_paid: cumulativePaid };
         });
     };
 
@@ -171,10 +192,14 @@ export default function AgentsPage() {
             `📋 *Agent Ledger: ${agent.name}*`,
             `Period: ${dateRange}`,
             `─────────────────────`,
-            ...filteredTxs.slice(0, 25).map((t, i) =>
-                `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | #${t.tx_id} | ${t.client_name} | ${Number(t.collected_amount).toLocaleString()} ${t.collected_currency}`
-            ),
-            filteredTxs.length > 25 ? `...and ${filteredTxs.length - 25} more transactions` : '',
+            ...filteredTxs.slice(0, 25).map((t, i) => {
+                if (t.record_type === 'collection') {
+                    return `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | COL #${t.tx_id} | ${t.client_name} | ${Number(t.collected_amount).toLocaleString()} ${t.collected_currency}`;
+                } else {
+                    return `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | PAY | Payment Received | ${Number(t.amount).toLocaleString()} ${t.currency}`;
+                }
+            }),
+            filteredTxs.length > 25 ? `...and ${filteredTxs.length - 25} more records` : '',
             `─────────────────────`,
             `Total Collected: *${totalCollected.toLocaleString()} ${cur}*`,
             `They Paid to Us: *${paidToUs.toLocaleString()} ${cur}*`,
@@ -367,33 +392,37 @@ export default function AgentsPage() {
 
             {/* History Modal */}
             {viewingAgent && (() => {
-                const allTxs = getAgentTxs(viewingAgent.$id);
+                const allTxs = getAgentTxs(viewingAgent.$id, viewingAgent.name);
                 const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
                 const cur = viewingAgent.currency || 'SAR';
                 const owedBal = cur === 'AED'
                     ? round2(viewingAgent.aed_balance || 0)
                     : round2(viewingAgent.sar_balance || 0);
 
-                const allTimeCollected = allTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
-                const paidToUsTotal = round2(Math.max(0, allTimeCollected - owedBal));
+                const allTimeCollected = allTxs.filter(t => t.record_type === 'collection').reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
+                const paidToUsTotal = allTxs.filter(t => t.record_type === 'payment').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
                 const exportLedgerExcel = () => {
                     const rows = filteredTxs.map((t, idx) => {
-                        const sarGot = Number(t.collected_amount) || 0;
+                        const isCollection = t.record_type === 'collection';
+                        const sarGot = isCollection ? (Number(t.collected_amount) || 0) : 0;
+                        const paymentAmt = !isCollection ? (Number(t.amount) || 0) : 0;
                         const cumCollected = Number(t.cumulative_collected) || 0;
-                        // Running paid: cumulative collected so far minus total still owed
-                        // (approximation: as more was collected, eventually the owed shrinks)
-                        const rowPaidToUs = round2(Math.max(0, cumCollected - owedBal));
-                        const rowOwedToUs = round2(Math.max(0, owedBal - Math.max(0, allTimeCollected - cumCollected)));
+                        const cumPaid = Number(t.cumulative_paid) || 0;
+
+                        // rowOwedToUs is cumulative collected minus cumulative paid
+                        const rowOwedToUs = round2(Math.max(0, cumCollected - cumPaid));
+
                         return {
                             '#': idx + 1,
-                            'Date': t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yyyy') : '',
+                            'Date': t.date_time ? format(t.date_time, 'dd MMM yyyy') : '',
+                            'Type': isCollection ? 'Collection' : 'Payment',
                             'Distributor': t.distributor_name || '',
-                            'Conversion Rate (per 1000 INR)': Number(t.collection_rate) || '',
-                            'INR to Distribute': Number(t.inr_requested) || '',
-                            'SAR We Got': sarGot,
-                            'Currency': t.collected_currency || cur,
-                            'They Paid Amount': rowPaidToUs,
+                            'Conversion Rate': isCollection ? (Number(t.collection_rate) || '') : '',
+                            'INR to Distribute': isCollection ? (Number(t.inr_requested) || '') : '',
+                            'Collected Base Ext': sarGot,
+                            'Currency': isCollection ? (t.collected_currency || cur) : t.currency,
+                            'They Paid Amount': paymentAmt,
                             'They Owed Us': rowOwedToUs,
                         };
                     });
@@ -458,7 +487,7 @@ export default function AgentsPage() {
 
                                 {/* Summary Cards */}
                                 {(() => {
-                                    const periodCollected = filteredTxs.reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
+                                    const periodCollected = filteredTxs.filter(t => t.record_type === 'collection').reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
                                     return (
                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
                                             <div className="card" style={{ padding: '14px', background: 'rgba(74,158,255,0.05)' }}>
@@ -507,6 +536,7 @@ export default function AgentsPage() {
                                                 <th style={{ textAlign: 'right' }}>SAR We Got</th>
                                                 <th style={{ textAlign: 'right' }}>Paid</th>
                                                 <th style={{ textAlign: 'right' }}>Balance</th>
+                                                <th style={{ textAlign: 'right' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -514,37 +544,51 @@ export default function AgentsPage() {
                                                 <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
                                             ) : (
                                                 filteredTxs.map((t, idx) => {
-                                                    const sarGot = Number(t.collected_amount) || 0;
+                                                    const isCollection = t.record_type === 'collection';
+                                                    const sarGot = isCollection ? (Number(t.collected_amount) || 0) : 0;
                                                     const cumCollected = Number(t.cumulative_collected) || 0;
-                                                    // Running paid per row: cumulative collected minus still outstanding
-                                                    const rowPaidToUs = round2(Math.max(0, cumCollected - owedBal));
-                                                    // Running owed: what remains outstanding after this row
-                                                    const remainingAfterThisRow = round2(allTimeCollected - cumCollected);
-                                                    const rowOwedToUs = round2(Math.max(0, owedBal - remainingAfterThisRow));
+                                                    const paymentAmt = !isCollection ? (Number(t.amount) || 0) : 0;
+                                                    const cumPaid = Number(t.cumulative_paid) || 0;
+
+                                                    // Running owed: cumulative collected minus cumulative paid
+                                                    const rowOwedToUs = round2(Math.max(0, cumCollected - cumPaid));
 
                                                     return (
                                                         <tr key={t.$id}>
                                                             <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
                                                             <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                                                                {t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM yy') : '—'}
+                                                                <span className={`badge ${isCollection ? 'badge-collector' : 'badge-completed'}`} style={{ marginRight: 6 }}>
+                                                                    {isCollection ? 'COL' : 'PAY'}
+                                                                </span>
+                                                                {t.date_time ? format(t.date_time, 'dd MMM yy HH:mm') : '—'}
                                                             </td>
                                                             <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                                                {t.distributor_name || '—'}
+                                                                {isCollection ? (t.distributor_name || '—') : '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--brand-primary)' }}>
-                                                                {t.collection_rate ? Number(t.collection_rate).toLocaleString() : '—'}
+                                                                {isCollection && t.collection_rate ? Number(t.collection_rate).toLocaleString() : '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                                                {t.inr_requested ? '₹' + Number(t.inr_requested).toLocaleString('en-IN') : '—'}
+                                                                {isCollection && t.inr_requested ? '₹' + Number(t.inr_requested).toLocaleString('en-IN') : '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
-                                                                {sarGot.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>
+                                                                {isCollection ? (sarGot.toLocaleString() + ' ') : '—'}
+                                                                {isCollection && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-accent)' }}>
-                                                                {rowPaidToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                                                {!isCollection ? (paymentAmt.toLocaleString() + ' ') : '—'}
+                                                                {!isCollection && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 800, color: rowOwedToUs > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
                                                                 {rowOwedToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                                            </td>
+                                                            <td style={{ textAlign: 'right' }}>
+                                                                <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                                    if (isCollection) window.open(`/transactions?q=${t.tx_id}`, '_blank');
+                                                                    else window.open(`/expenses`, '_blank');
+                                                                }}>
+                                                                    <Pencil size={12} />
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     );

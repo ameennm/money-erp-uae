@@ -89,7 +89,10 @@ export default function TransactionsPage() {
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
     const [settings, setSettings] = useState({ min_sar_rate: 0, min_aed_rate: 0 });
-    const [filter, setFilter] = useState('');
+    const [filter, setFilter] = useState(() => {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('q') || '';
+    });
     const [dateRange, setDateRange] = useState('All Time');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -167,15 +170,65 @@ export default function TransactionsPage() {
             });
 
             if (editTx) {
-                // Collector edits require admin approval
                 if (isCollectorOnly) {
                     payload.edit_pending_approval = true;
                     await dbService.updateTransaction(editTx.$id, payload);
                     toast.success('Edit submitted — awaiting admin approval');
                 } else {
                     payload.edit_pending_approval = false;
+
+                    // ── Update Distributor Balances ──
+                    const oldDistId = editTx.distributor_id;
+                    const newDistId = payload.distributor_id;
+                    const oldInr = Number(editTx.inr_requested) || 0;
+                    const newInr = Number(payload.inr_requested) || 0;
+
+                    if (oldDistId === newDistId && newDistId) {
+                        const deltaInr = newInr - oldInr;
+                        const dist = agents.find(a => a.$id === newDistId);
+                        if (dist && deltaInr !== 0) {
+                            await dbService.updateAgent(dist.$id, { inr_balance: round2((dist.inr_balance || 0) - deltaInr) });
+                        }
+                    } else {
+                        if (oldDistId && editTx.status === 'completed') {
+                            const oldDist = agents.find(a => a.$id === oldDistId);
+                            if (oldDist) await dbService.updateAgent(oldDist.$id, { inr_balance: round2((oldDist.inr_balance || 0) + oldInr) });
+                        }
+                        if (newDistId && editTx.status === 'completed') {
+                            const newDist = agents.find(a => a.$id === newDistId);
+                            if (newDist) await dbService.updateAgent(newDist.$id, { inr_balance: round2((newDist.inr_balance || 0) - newInr) });
+                        }
+                    }
+
+                    // ── Update Collection Agent Balances ──
+                    const oldAgentId = editTx.collection_agent_id;
+                    const newAgentId = payload.collection_agent_id;
+                    const oldColAmt = Number(editTx.collected_amount) || 0;
+                    const newColAmt = Number(payload.collected_amount) || 0;
+                    const oldCur = editTx.collected_currency || 'SAR';
+                    const newCur = payload.collected_currency || 'SAR';
+
+                    if (oldAgentId) {
+                        const oldAgent = agents.find(a => a.$id === oldAgentId);
+                        if (oldAgent) {
+                            const balField = oldCur === 'AED' ? 'aed_balance' : 'sar_balance';
+                            await dbService.updateAgent(oldAgent.$id, { [balField]: Math.max(0, round2((oldAgent[balField] || 0) - oldColAmt)) });
+                        }
+                    }
+                    if (newAgentId) {
+                        const newAgent = agents.find(a => a.$id === newAgentId);
+                        if (newAgent) {
+                            const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
+                            await dbService.updateAgent(newAgent.$id, { [balField]: round2((newAgent[balField] || 0) + newColAmt) });
+                        }
+                    }
+
+                    // ── Calculate INR profit from rate spread ──
+                    const profitInr = calcProfitInr(payload.collection_rate, newCur, payload.inr_requested);
+                    if (profitInr > 0) payload.profit_inr = profitInr;
+
                     await dbService.updateTransaction(editTx.$id, payload);
-                    toast.success('Updated');
+                    toast.success('Transaction Updated successfully');
                 }
             } else {
                 if (!payload.distributor_id) {
@@ -486,7 +539,7 @@ export default function TransactionsPage() {
                                 <th>TX ID</th>
                                 <th>Client</th>
                                 <th>Requested</th>
-                                <th>Collected</th>
+                                <th>Amount</th>
                                 <th>Agent</th>
                                 {isAdmin && <th>Profit</th>}
                                 {isAdmin && <th>Distributor</th>}

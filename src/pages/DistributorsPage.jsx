@@ -490,6 +490,7 @@ export default function DistributorsPage() {
                                                 <th style={{ textAlign: 'right' }}>Credit (Deposit)</th>
                                                 <th style={{ textAlign: 'right' }}>Debit (Payout)</th>
                                                 <th style={{ textAlign: 'right' }}>Running Bal</th>
+                                                <th style={{ textAlign: 'right' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -522,6 +523,14 @@ export default function DistributorsPage() {
                                                         </td>
                                                         <td style={{ textAlign: 'right', fontWeight: 800, color: ev.running_balance >= 0 ? 'inherit' : 'var(--status-failed)' }}>
                                                             {ev.running_balance < 0 ? '-' : ''}₹{Math.abs(Number(ev.running_balance)).toLocaleString('en-IN')}
+                                                        </td>
+                                                        <td style={{ textAlign: 'right' }}>
+                                                            <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                                if (ev.type === 'distribution') window.open(`/transactions?q=${ev.ref.replace('#', '')}`, '_blank');
+                                                                else window.open(`/expenses`, '_blank');
+                                                            }}>
+                                                                <Pencil size={12} />
+                                                            </button>
                                                         </td>
                                                     </tr>
                                                 ))

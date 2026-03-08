@@ -48,6 +48,8 @@ const convTypeBadge = (type) => {
 export default function ConversionAgentsPage() {
     const [agents, setAgents] = useState([]);
     const [convRecs, setConvRecs] = useState([]);   // AED conversion records
+    const [txs, setTxs] = useState([]);
+    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -61,24 +63,137 @@ export default function ConversionAgentsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [ar, cr] = await Promise.all([
+            const [ar, cr, tr, ex] = await Promise.all([
                 dbService.listAgents([Query.or([Query.equal('type', 'conversion_sar'), Query.equal('type', 'conversion_aed'), Query.equal('type', 'conversion')])]),
-                dbService.listAedConversions(),
+                dbService.listAedConversions(), // Bulk SAR->AED
+                dbService.listTransactions(), // Individual SAR->AED
+                dbService.listExpenses(), // Bulk AED->INR
             ]);
             setAgents(ar.documents);
             setConvRecs(cr.documents);
+            setTxs(tr.documents);
+            setExpenseRecs(ex.documents);
         } catch (e) { toast.error(e.message); }
         finally { setLoading(false); }
     };
     useEffect(() => { fetchAll(); }, []);
 
+    // Get all combined records for an agent
+    const getAgentConversions = (agentId, agentName, agentType) => {
+        let combined = [];
+
+        if (agentType !== 'conversion_aed') {
+            // 1. Bulk SAR->AED from aed_conversions
+            const bulkSarAed = convRecs.filter(r => r.conversion_agent_id === agentId).map(r => ({
+                ...r,
+                $id: r.$id,
+                record_type: 'bulk_sar_aed',
+                date_time: new Date(r.date || r.$createdAt),
+                sar_amount: Number(r.sar_amount) || 0,
+                aed_amount: Number(r.aed_amount) || 0,
+                rate: r.sar_rate || (r.sar_amount ? (Number(r.aed_amount) / Number(r.sar_amount)).toFixed(4) : ''),
+                profit_inr: Number(r.profit_inr) || 0,
+                status: 'completed',
+            }));
+            combined.push(...bulkSarAed);
+
+            // 2. Individual SAR->AED from transactions
+            const indSarAed = txs.filter(t => t.conversion_agent_id === agentId).map(t => {
+                const collectedAed = (t.collected_currency === 'AED') ? Number(t.collected_amount) : 0;
+                const convertedAed = (t.collected_currency !== 'AED' && t.sar_to_aed_rate) ? Number(t.collected_amount) * Number(t.sar_to_aed_rate) : 0;
+                const aedAmount = collectedAed || convertedAed;
+
+                return {
+                    ...t,
+                    $id: t.$id,
+                    record_type: 'tx_sar_aed',
+                    date_time: new Date(t.$createdAt),
+                    sar_amount: t.collected_currency !== 'AED' ? Number(t.collected_amount) : 0,
+                    aed_amount: aedAmount,
+                    rate: t.sar_to_aed_rate || '',
+                    profit_inr: 0, // Profit is mixed at transaction level, not strictly from conversion
+                    status: t.status,
+                };
+            });
+            combined.push(...indSarAed);
+        }
+
+        if (agentType === 'conversion_aed') {
+            // 3. Bulk AED->INR from expenses
+            const bulkAedInr = expenseRecs.filter(e =>
+                e.type === 'expense' &&
+                e.category === 'AED→INR Conversion' &&
+                e.currency === 'AED' &&
+                (e.title.includes(agentName) || (e.notes && e.notes.includes(agentName)))
+            ).map(e => {
+                // Find the matching INR income expense
+                const inrIncome = expenseRecs.find(inc =>
+                    inc.type === 'income' &&
+                    inc.category === 'AED→INR Conversion' &&
+                    inc.date === e.date &&
+                    (
+                        Math.abs(new Date(inc.$createdAt || 0) - new Date(e.$createdAt || 0)) < 15000 ||
+                        (inc.notes || '').includes(`${e.amount} AED`)
+                    )
+                );
+                const inrAmount = inrIncome ? Number(inrIncome.amount) : 0;
+                const rate = e.amount ? (inrAmount / Number(e.amount)).toFixed(4) : '';
+
+                return {
+                    ...e,
+                    $id: e.$id,
+                    record_type: 'bulk_aed_inr',
+                    date_time: new Date(e.date || e.$createdAt),
+                    aed_amount: Number(e.amount) || 0,
+                    inr_amount: inrAmount,
+                    rate: rate,
+                    profit_inr: 0,
+                    status: 'completed',
+                    inr_expense_id: inrIncome ? inrIncome.$id : null
+                };
+            });
+            combined.push(...bulkAedInr);
+        }
+
+        // Sort chronological
+        combined.sort((a, b) => a.date_time - b.date_time);
+
+        // Calculate running totals
+        let runningAed = 0;
+        let runningInr = 0;
+        let runningProfit = 0;
+
+        return combined.map(r => {
+            if (r.record_type.includes('sar_aed')) {
+                runningAed += r.aed_amount;
+            } else if (r.record_type.includes('aed_inr')) {
+                runningAed -= r.aed_amount; // They took our AED
+                runningInr += r.inr_amount; // And gave us INR
+            }
+            runningProfit += r.profit_inr;
+
+            if (Math.abs(runningAed) < 0.001) runningAed = 0;
+            if (Math.abs(runningInr) < 0.001) runningInr = 0;
+            if (Math.abs(runningProfit) < 0.001) runningProfit = 0;
+
+            return {
+                ...r,
+                running_aed: runningAed,
+                running_inr: runningInr,
+                running_profit: runningProfit
+            };
+        });
+    };
+
     // ── Per-agent stats ───────────────────────────────────────────────────────
-    const agentStats = (agentId) => {
-        const recs = convRecs.filter(r => r.conversion_agent_id === agentId);
+    const agentStats = (agent) => {
+        const recs = getAgentConversions(agent.$id, agent.name, agent.type);
         return {
             count: recs.length,
             sarSent: recs.reduce((a, r) => a + (Number(r.sar_amount) || 0), 0),
-            aedGot: recs.reduce((a, r) => a + (Number(r.aed_amount) || 0), 0),
+            aedGot: recs.reduce((a, r) => r.record_type.includes('sar_aed') ? a + (Number(r.aed_amount) || 0) : a, 0),
+            aedSent: recs.reduce((a, r) => r.record_type.includes('aed_inr') ? a + (Number(r.aed_amount) || 0) : a, 0),
+            inrGot: recs.reduce((a, r) => a + (Number(r.inr_amount) || 0), 0),
             profit: recs.reduce((a, r) => a + (Number(r.profit_inr) || 0), 0),
         };
     };
@@ -140,7 +255,7 @@ export default function ConversionAgentsPage() {
             ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 16 }}>
                     {agents.map((a) => {
-                        const s = agentStats(a.$id);
+                        const s = agentStats(a);
                         return (
                             <div key={a.$id} className="card" style={{ padding: 20, border: '1px solid rgba(0,200,150,0.12)', transition: 'transform 0.2s', cursor: 'pointer' }}
                                 onClick={(e) => {
@@ -180,7 +295,9 @@ export default function ConversionAgentsPage() {
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'AED Sent' : 'SAR Sent'}</div>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                                             <TrendingUp size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff' }} />
-                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff', fontSize: 15 }}>{s.sarSent.toLocaleString()}</span>
+                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--brand-gold)' : '#4a9eff', fontSize: 15 }}>
+                                                {a.type === 'conversion_aed' ? s.aedSent.toLocaleString() : s.sarSent.toLocaleString()}
+                                            </span>
                                         </div>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{s.count} conversion{s.count !== 1 ? 's' : ''}</div>
                                     </div>
@@ -188,7 +305,9 @@ export default function ConversionAgentsPage() {
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{a.type === 'conversion_aed' ? 'INR Got' : 'AED Got'}</div>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                                             <Banknote size={13} style={{ color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }} />
-                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)', fontSize: 15 }}>{s.aedGot.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                                            <span style={{ fontWeight: 700, color: a.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)', fontSize: 15 }}>
+                                                {a.type === 'conversion_aed' ? s.inrGot.toLocaleString() : s.aedGot.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                            </span>
                                         </div>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{a.type === 'conversion_aed' ? 'INR' : 'AED'}</div>
                                     </div>
@@ -217,22 +336,7 @@ export default function ConversionAgentsPage() {
 
             {/* History Modal */}
             {viewingAgent && (() => {
-                let recs = convRecs.filter(r => r.conversion_agent_id === viewingAgent.$id);
-                // sort chronologically to compute running totals
-                recs.sort((a, b) => new Date(a.$createdAt || a.date) - new Date(b.$createdAt || b.date));
-
-                let runningAED = 0;
-                let runningProfit = 0;
-                let allTxs = recs.map(r => {
-                    runningAED += Number(r.aed_amount) || 0;
-                    runningProfit += Number(r.profit_inr) || 0;
-                    return {
-                        ...r,
-                        running_aed: runningAED,
-                        running_profit: runningProfit
-                    };
-                });
-
+                let allTxs = getAgentConversions(viewingAgent.$id, viewingAgent.name, viewingAgent.type);
                 const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
 
                 const exportLedgerExcel = () => {
@@ -292,13 +396,14 @@ export default function ConversionAgentsPage() {
                                         <thead>
                                             <tr>
                                                 <th style={{ width: 40 }}>#</th>
+                                                <th>Type / Ref</th>
                                                 <th>Date</th>
                                                 <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'Sent (AED)' : 'Sent (SAR)'}</th>
                                                 <th style={{ textAlign: 'center' }}>Rate</th>
                                                 <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'Received (INR)' : 'Received (AED)'}</th>
-                                                <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'INR Balance' : 'AED Balance'}</th>
                                                 <th style={{ textAlign: 'right' }}>Profit (INR)</th>
                                                 <th>Notes</th>
+                                                <th style={{ textAlign: 'right' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -310,25 +415,39 @@ export default function ConversionAgentsPage() {
                                                     return (
                                                         <tr key={r.$id}>
                                                             <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                                            <td>
+                                                                <span className={`badge ${r.record_type.includes('bulk') ? 'badge-completed' : 'badge-collector'}`}>
+                                                                    {r.record_type.includes('bulk') ? 'BULK' : 'INDV'}
+                                                                </span>
+                                                                {!r.record_type.includes('bulk') && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>#{r.tx_id}</div>}
+                                                            </td>
                                                             <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                                                                <div className="flex items-center gap-1"><Calendar size={12} /> {r.date}</div>
+                                                                <div className="flex items-center gap-1"><Calendar size={12} /> {r.date_time ? format(r.date_time, 'dd MMM yy') : ''}</div>
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--brand-gold)' : undefined }}>
                                                                 {isAedToInr ? Number(r.aed_amount).toLocaleString() : Number(r.sar_amount).toLocaleString()}
                                                             </td>
                                                             <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                                                                {isAedToInr ? r.aed_to_inr_rate || '—' : r.sar_rate}
+                                                                {r.rate || '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
                                                                 +{isAedToInr ? Number(r.inr_amount || 0).toLocaleString('en-IN') : Number(r.aed_amount).toLocaleString()}
                                                             </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                                                {isAedToInr ? Number(r.running_inr || 0).toLocaleString('en-IN') : Number(r.running_aed).toLocaleString()}
-                                                            </td>
                                                             <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
-                                                                {r.profit_inr >= 0 ? '+' : ''}₹{Number(r.profit_inr).toLocaleString('en-IN')}
+                                                                {r.profit_inr ? (r.profit_inr >= 0 ? '+' : '') + '₹' + Number(r.profit_inr).toLocaleString('en-IN') : '—'}
                                                             </td>
-                                                            <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
+                                                            <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {r.notes || r.client_name || '—'}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right' }}>
+                                                                <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                                    if (r.record_type === 'tx_sar_aed') window.open(`/transactions?q=${r.tx_id}`, '_blank');
+                                                                    else if (r.record_type === 'bulk_aed_inr') window.open(`/expenses`, '_blank');
+                                                                    else toast.error('Bulk SAR->AED edits not yet implemented here'); // could add a modal if needed
+                                                                }}>
+                                                                    <Pencil size={12} />
+                                                                </button>
+                                                            </td>
                                                         </tr>
                                                     );
                                                 })
@@ -336,19 +455,21 @@ export default function ConversionAgentsPage() {
                                         </tbody>
                                         <tfoot>
                                             <tr>
-                                                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--brand-gold)' : undefined }}>
                                                     {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.aed_amount : r.sar_amount) || 0), 0).toLocaleString()}
                                                 </td>
                                                 <td></td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
+                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.inr_amount : r.aed_amount) || 0), 0).toLocaleString(viewingAgent.type === 'conversion_aed' ? 'en-IN' : undefined)}
+                                                </td>
+                                                <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
                                                     {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.inr_amount || 0 : r.aed_amount) || 0), 0).toLocaleString()}
                                                 </td>
-                                                <td></td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
                                                     ₹{filteredTxs.reduce((a, r) => a + (Number(r.profit_inr) || 0), 0).toLocaleString('en-IN')}
                                                 </td>
-                                                <td></td>
+                                                <td colSpan={2}></td>
                                             </tr>
                                         </tfoot>
                                     </table>
