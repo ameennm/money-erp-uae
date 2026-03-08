@@ -14,7 +14,7 @@ const NAV = {
         { label: 'Distributors', path: '/distributors', icon: UserCog },
         { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
         { label: 'Activity Logs', path: '/activity-logs', icon: Activity },
-        { label: 'Reports', path: '/reports', icon: FileSpreadsheet },
+        { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
         { label: 'Settings', path: '/settings', icon: Settings },
     ],
     collector: [
@@ -25,7 +25,7 @@ const NAV = {
         { label: 'Distributors', path: '/distributors', icon: UserCog },
         { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
         { label: 'Activity Logs', path: '/activity-logs', icon: Activity },
-        { label: 'Reports', path: '/reports', icon: FileSpreadsheet },
+        { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
     ],
 };
 

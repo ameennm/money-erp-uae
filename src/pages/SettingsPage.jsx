@@ -50,9 +50,9 @@ export default function SettingsPage() {
 
     const wipeAllData = async () => {
         const confirmed = window.prompt(
-            'DANGER: This will delete ALL transactions, expenses, conversion records, and reset all agent balances.\n\nType "WIPE" to confirm:'
+            'DANGER: This will delete ALL transactions, expenses, conversion records, and reset all agent balances.\n\nType "wipe all data" to confirm:'
         );
-        if (confirmed !== 'WIPE') return toast.error('Aborted. You did not type WIPE.');
+        if (confirmed !== 'wipe all data') return toast.error('Aborted. You did not type wipe all data.');
         setWiping(true);
         const cols = ['transactions', 'aed_conversions', 'expenses', 'credits'];
         try {

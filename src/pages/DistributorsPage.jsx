@@ -206,6 +206,36 @@ export default function DistributorsPage() {
         }
     };
 
+    const handleDeleteRecord = async (e, ev) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this record? This cannot be undone.')) return;
+        try {
+            setSaving(true);
+            if (ev.type === 'distribution') {
+                toast.error('To delete a transaction (distribution), please go to the Transactions page.');
+            } else if (ev.type === 'deposit' || ev.type === 'transfer_out' || ev.type === 'transfer_in') {
+                if (viewingDist) {
+                    const undoBal = -Number(ev.amount); // If positive (deposit), subtract. If negative (transfer out), add.
+                    if (undoBal && !isNaN(undoBal)) {
+                        await dbService.updateAgent(viewingDist.$id, { inr_balance: round2((Number(viewingDist.inr_balance) || 0) + undoBal) });
+                    }
+                }
+                const originalId = ev.$id.replace('_in', '').replace('_out', '').replace('_comm', '');
+                await dbService.deleteExpense(originalId);
+                toast.success('Record deleted');
+                setViewingDist(null);
+                fetchAll();
+            } else if (ev.type === 'commission') {
+                // Commissions are just tx expenses. Handled by transaction deletions mostly, but if it's standalone, we delete the expense.
+                toast.error('Commissions are tied to transactions. Please delete the transaction.');
+            }
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
         <Layout title="Distributors">
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
@@ -525,11 +555,14 @@ export default function DistributorsPage() {
                                                             {ev.running_balance < 0 ? '-' : ''}₹{Math.abs(Number(ev.running_balance)).toLocaleString('en-IN')}
                                                         </td>
                                                         <td style={{ textAlign: 'right' }}>
-                                                            <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                            <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
                                                                 if (ev.type === 'distribution') window.open(`/transactions?q=${ev.ref.replace('#', '')}`, '_blank');
                                                                 else window.open(`/expenses`, '_blank');
                                                             }}>
                                                                 <Pencil size={12} />
+                                                            </button>
+                                                            <button className="btn btn-danger btn-sm btn-icon" onClick={(e) => handleDeleteRecord(e, ev)} title="Delete Record">
+                                                                <Trash2 size={12} />
                                                             </button>
                                                         </td>
                                                     </tr>

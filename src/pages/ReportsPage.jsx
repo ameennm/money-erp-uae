@@ -262,7 +262,7 @@ export default function ReportsPage() {
 
     if (loading) {
         return (
-            <Layout title="Reports">
+            <Layout title="Ledger">
                 <div className="loading-screen" style={{ minHeight: '60vh' }}>
                     <div className="spinner" /><p>Loading ledger…</p>
                 </div>

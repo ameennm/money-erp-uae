@@ -171,14 +171,23 @@ export default function ConversionAgentsPage() {
             let sar_amt = 0; let aed_amt = 0; let inr_amt = 0; let rate = '';
 
             if (e.category === 'Conversion Deposit') {
-                if (e.currency === 'SAR') sar_amt = Number(e.amount);
-                else aed_amt = Number(e.amount);
-
                 const rateMatch = e.notes?.match(/@ ([\d.]+)\. Agent owes/);
                 if (rateMatch) rate = rateMatch[1];
+
+                if (e.currency === 'SAR') {
+                    sar_amt = Number(e.amount) || 0;
+                    aed_amt = sar_amt * Number(rate || 0); // They owe this AED
+                } else if (e.currency === 'AED') {
+                    aed_amt = Number(e.amount) || 0;
+                    inr_amt = aed_amt * Number(rate || 0); // They owe this INR
+                }
             } else { // Receipt
-                if (e.currency === 'AED') aed_amt = Number(e.amount);
-                else inr_amt = Number(e.amount);
+                if (e.currency === 'AED') {
+                    aed_amt = Number(e.amount) || 0;
+                }
+                else {
+                    inr_amt = Number(e.amount) || 0;
+                }
             }
 
             return {
@@ -205,11 +214,18 @@ export default function ConversionAgentsPage() {
         let runningProfit = 0;
 
         return combined.map(r => {
-            if (r.record_type.includes('sar_aed')) {
-                runningAed += r.aed_amount;
-            } else if (r.record_type.includes('aed_inr')) {
-                runningAed -= r.aed_amount; // They took our AED
-                runningInr += r.inr_amount; // And gave us INR
+            if (agentType === 'conversion_sar') {
+                if (r.record_type.includes('sar_aed') || r.record_type === 'deposit') {
+                    runningAed += r.aed_amount;
+                } else if (r.record_type === 'receipt') {
+                    runningAed -= r.aed_amount;
+                }
+            } else if (agentType === 'conversion_aed') {
+                if (r.record_type.includes('aed_inr') || r.record_type === 'deposit') {
+                    runningInr += r.inr_amount;
+                } else if (r.record_type === 'receipt') {
+                    runningInr -= r.inr_amount;
+                }
             }
             runningProfit += r.profit_inr;
 
@@ -217,11 +233,24 @@ export default function ConversionAgentsPage() {
             if (Math.abs(runningInr) < 0.001) runningInr = 0;
             if (Math.abs(runningProfit) < 0.001) runningProfit = 0;
 
+            let displaySent = 0;
+            let displayReceived = 0;
+
+            if (agentType === 'conversion_sar') {
+                displaySent = r.sar_amount || 0;
+                displayReceived = (r.record_type === 'receipt' || r.record_type.includes('bulk')) ? (r.aed_amount || 0) : 0;
+            } else if (agentType === 'conversion_aed') {
+                displaySent = (r.record_type === 'deposit' || r.record_type.includes('bulk')) ? (r.aed_amount || 0) : 0;
+                displayReceived = (r.record_type === 'receipt' || r.record_type.includes('bulk')) ? (r.inr_amount || 0) : 0;
+            }
+
             return {
                 ...r,
                 running_aed: runningAed,
                 running_inr: runningInr,
-                running_profit: runningProfit
+                running_profit: runningProfit,
+                display_sent: displaySent,
+                display_received: displayReceived
             };
         });
     };
@@ -231,10 +260,10 @@ export default function ConversionAgentsPage() {
         const recs = getAgentConversions(agent.$id, agent.name, agent.type);
         return {
             count: recs.length,
-            sarSent: recs.reduce((a, r) => a + (Number(r.sar_amount) || 0), 0),
-            aedGot: recs.reduce((a, r) => r.record_type.includes('sar_aed') ? a + (Number(r.aed_amount) || 0) : a, 0),
-            aedSent: recs.reduce((a, r) => r.record_type.includes('aed_inr') ? a + (Number(r.aed_amount) || 0) : a, 0),
-            inrGot: recs.reduce((a, r) => a + (Number(r.inr_amount) || 0), 0),
+            sarSent: recs.reduce((a, r) => a + (Number(r.display_sent) || 0), 0),
+            aedGot: recs.reduce((a, r) => a + (Number(r.display_received) || 0), 0),
+            aedSent: recs.reduce((a, r) => a + (Number(r.display_sent) || 0), 0),
+            inrGot: recs.reduce((a, r) => a + (Number(r.display_received) || 0), 0),
             profit: recs.reduce((a, r) => a + (Number(r.profit_inr) || 0), 0),
         };
     };
@@ -488,7 +517,7 @@ export default function ConversionAgentsPage() {
                                     <th>Name</th>
                                     <th>Phone</th>
                                     <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total SAR Sent' : 'Total AED Sent'}</th>
-                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total AED Got' : 'Total INR Got'}</th>
+                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total AED' : 'Total INR'}</th>
                                     <th style={{ textAlign: 'right' }}>Net Profit (INR)</th>
                                     <th style={{ textAlign: 'right' }}>Balance Owed To Us</th>
                                     <th style={{ textAlign: 'center' }}>Ledger Operations</th>
@@ -505,7 +534,18 @@ export default function ConversionAgentsPage() {
                                         <tr key={a.$id}>
                                             <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                                             <td>
-                                                <div style={{ fontWeight: 600 }}>{a.name}</div>
+                                                <div style={{ fontWeight: 600 }}>
+                                                    <button
+                                                        onClick={() => setViewingAgent(a)}
+                                                        style={{
+                                                            background: 'none', border: 'none', padding: 0,
+                                                            fontWeight: 'inherit', cursor: 'pointer',
+                                                            textDecoration: 'underline', color: 'var(--brand-accent)'
+                                                        }}
+                                                    >
+                                                        {a.name}
+                                                    </button>
+                                                </div>
                                                 {a.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.notes}</div>}
                                             </td>
                                             <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
@@ -570,10 +610,10 @@ export default function ConversionAgentsPage() {
                     const rows = filteredTxs.map((r, idx) => ({
                         '#': idx + 1,
                         'Date': r.date || '',
-                        'SAR Sent': Number(r.sar_amount),
+                        'SAR Sent': Number(r.display_sent),
                         'Rate': r.sar_rate,
-                        'AED Received': Number(r.aed_amount),
-                        'AED Running Balance': Number(r.running_aed),
+                        'Received': Number(r.display_received),
+                        'Running Balance': Number(viewingAgent.type === 'conversion_aed' ? r.running_inr : r.running_aed),
                         'Profit INR': Number(r.profit_inr || 0),
                         'Notes': r.notes || '',
                     }));
@@ -629,6 +669,7 @@ export default function ConversionAgentsPage() {
                                                 <th style={{ textAlign: 'center' }}>Rate</th>
                                                 <th style={{ textAlign: 'right' }}>{viewingAgent.type === 'conversion_aed' ? 'Received (INR)' : 'Received (AED)'}</th>
                                                 <th style={{ textAlign: 'right' }}>Profit (INR)</th>
+                                                <th style={{ textAlign: 'right' }}>Balance</th>
                                                 <th>Notes</th>
                                                 <th style={{ textAlign: 'right' }}>Actions</th>
                                             </tr>
@@ -652,16 +693,19 @@ export default function ConversionAgentsPage() {
                                                                 <div className="flex items-center gap-1"><Calendar size={12} /> {r.date_time ? format(r.date_time, 'dd MMM yy') : ''}</div>
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--brand-gold)' : undefined }}>
-                                                                {isAedToInr ? Number(r.aed_amount).toLocaleString() : Number(r.sar_amount).toLocaleString()}
+                                                                {Number(r.display_sent).toLocaleString()}
                                                             </td>
                                                             <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
                                                                 {r.rate || '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'right', fontWeight: 700, color: isAedToInr ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
-                                                                +{isAedToInr ? Number(r.inr_amount || 0).toLocaleString('en-IN') : Number(r.aed_amount).toLocaleString()}
+                                                                +{Number(r.display_received).toLocaleString(isAedToInr ? 'en-IN' : undefined)}
                                                             </td>
                                                             <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
                                                                 {r.profit_inr ? (r.profit_inr >= 0 ? '+' : '') + '₹' + Number(r.profit_inr).toLocaleString('en-IN') : '—'}
+                                                            </td>
+                                                            <td style={{ textAlign: 'right', fontWeight: 800, color: (isAedToInr ? r.running_inr : r.running_aed) >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                                                {(isAedToInr ? r.running_inr : r.running_aed) < 0 ? '-' : ''}{Math.abs(Number(isAedToInr ? r.running_inr : r.running_aed)).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isAedToInr ? 'INR' : 'AED'}</span>
                                                             </td>
                                                             <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {r.notes || r.client_name || '—'}
@@ -688,18 +732,16 @@ export default function ConversionAgentsPage() {
                                             <tr>
                                                 <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--brand-gold)' : undefined }}>
-                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.aed_amount : r.sar_amount) || 0), 0).toLocaleString()}
+                                                    {filteredTxs.reduce((a, r) => a + (Number(r.display_sent) || 0), 0).toLocaleString()}
                                                 </td>
                                                 <td></td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
-                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.inr_amount : r.aed_amount) || 0), 0).toLocaleString(viewingAgent.type === 'conversion_aed' ? 'en-IN' : undefined)}
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontWeight: 800, color: viewingAgent.type === 'conversion_aed' ? 'var(--text-primary)' : 'var(--brand-gold)' }}>
-                                                    {filteredTxs.reduce((a, r) => a + (Number(viewingAgent.type === 'conversion_aed' ? r.inr_amount || 0 : r.aed_amount) || 0), 0).toLocaleString()}
+                                                    {filteredTxs.reduce((a, r) => a + (Number(r.display_received) || 0), 0).toLocaleString(viewingAgent.type === 'conversion_aed' ? 'en-IN' : undefined)}
                                                 </td>
                                                 <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
                                                     ₹{filteredTxs.reduce((a, r) => a + (Number(r.profit_inr) || 0), 0).toLocaleString('en-IN')}
                                                 </td>
+                                                <td></td>
                                                 <td colSpan={2}></td>
                                             </tr>
                                         </tfoot>

@@ -165,12 +165,14 @@ export default function ExpensesPage() {
                     <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
                         <Download size={15} /> Excel
                     </button>
-                    <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
-                        <Plus size={16} /> Add Income
-                    </button>
-                    <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
-                        <Plus size={16} /> Add Expense
-                    </button>
+                    <div className="flex gap-2">
+                        <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
+                            <Plus size={16} /> Add Income
+                        </button>
+                        <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
+                            <Plus size={16} /> Add Expense
+                        </button>
+                    </div>
                 </div>
             </div>
 

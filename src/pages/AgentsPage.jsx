@@ -150,6 +150,32 @@ export default function AgentsPage() {
         }
     };
 
+    const handleDeleteRecord = async (e, r) => {
+        e.stopPropagation();
+        if (!window.confirm('Delete this record? This cannot be undone.')) return;
+        try {
+            setSaving(true);
+            if (r.record_type === 'collection') {
+                toast.error('To delete a transaction, please go to the Transactions page.');
+            } else if (r.record_type === 'payment') {
+                if (viewingAgent) {
+                    const undoBal = Number(r.amount);
+                    if (undoBal) {
+                        const balField = viewingAgent.currency === 'AED' ? 'aed_balance' : 'sar_balance';
+                        await dbService.updateAgent(viewingAgent.$id, { [balField]: round2((Number(viewingAgent[balField]) || 0) + undoBal) });
+                    }
+                }
+                await dbService.deleteExpense(r.$id);
+                toast.success('Payment deleted');
+                fetch();
+            }
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     // Build agent ledger with running per-row paid/owed
     // Build agent ledger with running per-row paid/owed
     const getAgentTxs = (agentId, agentName) => {
@@ -583,11 +609,14 @@ export default function AgentsPage() {
                                                                 {rowOwedToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
                                                             </td>
                                                             <td style={{ textAlign: 'right' }}>
-                                                                <button className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                                <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
                                                                     if (isCollection) window.open(`/transactions?q=${t.tx_id}`, '_blank');
                                                                     else window.open(`/expenses`, '_blank');
                                                                 }}>
                                                                     <Pencil size={12} />
+                                                                </button>
+                                                                <button className="btn btn-danger btn-sm btn-icon" onClick={(e) => handleDeleteRecord(e, t)} title="Delete Record">
+                                                                    <Trash2 size={12} />
                                                                 </button>
                                                             </td>
                                                         </tr>
