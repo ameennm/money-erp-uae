@@ -113,7 +113,7 @@ export default function DashboardPage() {
         try {
             const aedAmount = targetAmount * rate;
 
-            await dbService.createAedConversion({
+            const created = await dbService.createAedConversion({
                 sar_amount: safeFloat(targetAmount),
                 aed_amount: safeFloat(aedAmount),
                 conversion_agent_id: convertForm.conversion_agent_id,
@@ -124,7 +124,8 @@ export default function DashboardPage() {
             toast.success(`Converted ${targetAmount} SAR → ${aedAmount.toFixed(2)} AED`);
             setConvertModal(false);
             setConvertForm({ sar_to_convert: '', sar_to_aed_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
-            fetchAll();
+            // Optimistic: append conversion record to state
+            setConvRecs(prev => [{ ...created, sar_amount: safeFloat(targetAmount), aed_amount: safeFloat(aedAmount), conversion_agent_id: convertForm.conversion_agent_id, conversion_agent_name: convertForm.conversion_agent_name }, ...prev]);
         } catch (error) {
             toast.error(error.message);
         } finally {
@@ -169,7 +170,12 @@ export default function DashboardPage() {
             toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')} via ${inrForm.conversion_agent_name}`);
             setInrConvertModal(false);
             setInrForm({ aed_amount: '', aed_to_inr_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
-            fetchAll();
+            // Optimistic: append expense records to state
+            setExpenseRecs(prev => [
+                { type: 'expense', category: 'AED→INR Conversion', amount: safeFloat(aedAmt), currency: 'AED', date: new Date().toISOString().split('T')[0] },
+                { type: 'income', category: 'AED→INR Conversion', amount: safeFloat(inrAmount), currency: 'INR', date: new Date().toISOString().split('T')[0] },
+                ...prev
+            ]);
         } catch (error) {
             toast.error('Conversion failed: ' + error.message);
         } finally {

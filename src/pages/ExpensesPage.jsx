@@ -66,11 +66,12 @@ export default function ExpensesPage() {
                 payload.distributor_id = '';
                 payload.distributor_name = '';
             }
-            await dbService.createExpense(payload);
+            const created = await dbService.createExpense(payload);
             toast.success('Record saved');
             setModal(false);
             setForm(EMPTY);
-            fetch();
+            // Optimistic: prepend new record to state
+            setExpenses(prev => [{ ...created, ...payload }, ...prev]);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -83,7 +84,8 @@ export default function ExpensesPage() {
         try {
             await dbService.deleteExpense(id);
             toast.success('Deleted');
-            fetch();
+            // Optimistic: remove from state
+            setExpenses(prev => prev.filter(e => e.$id !== id));
         } catch (e) {
             toast.error(e.message);
         }

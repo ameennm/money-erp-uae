@@ -113,7 +113,9 @@ export default function DistributorsPage() {
 
             toast.success(`₹${amt.toLocaleString('en-IN')} deposited to ${editItem.name}`);
             setDepositModal(false);
-            fetchAll();
+            // Optimistic: update distributor balance and add expense record
+            setDistributors(prev => prev.map(d => d.$id === editItem.$id ? { ...d, inr_balance: newBal } : d));
+            setExpenseRecs(prev => [{ type: 'expense', category: 'Distributor Deposit', amount: round2(amt), currency: 'INR' }, ...prev]);
         } catch (e) { toast.error('Deposit failed: ' + e.message); }
         finally { setSaving(false); }
     };
@@ -132,12 +134,15 @@ export default function DistributorsPage() {
             if (editItem) {
                 await dbService.updateAgent(editItem.$id, payload);
                 toast.success('Distributor Updated');
+                // Optimistic: update in state
+                setDistributors(prev => prev.map(d => d.$id === editItem.$id ? { ...d, ...payload } : d));
             } else {
-                await dbService.createAgent(payload);
+                const created = await dbService.createAgent(payload);
                 toast.success('Distributor Created');
+                // Optimistic: prepend new distributor
+                setDistributors(prev => [{ ...created, ...payload }, ...prev]);
             }
             setModal(false);
-            fetchAll();
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -187,7 +192,17 @@ export default function DistributorsPage() {
             ]);
             toast.success(`✅ ₹${amt.toLocaleString('en-IN')} transferred from ${transferFrom.name} to ${toDist.name}`);
             setTransferModal(false);
-            fetchAll();
+            // Optimistic: update both distributor balances
+            setDistributors(prev => prev.map(d => {
+                if (d.$id === transferFrom.$id) return { ...d, inr_balance: newFromBal };
+                if (d.$id === toDist.$id) return { ...d, inr_balance: newToBal };
+                return d;
+            }));
+            setExpenseRecs(prev => [
+                { type: 'expense', category: 'Distributor Transfer', amount: amt, currency: 'INR' },
+                { type: 'expense', category: 'Distributor Transfer', amount: amt, currency: 'INR' },
+                ...prev
+            ]);
         } catch (err) {
             toast.error('Transfer failed: ' + err.message);
         } finally {
@@ -200,7 +215,8 @@ export default function DistributorsPage() {
         try {
             await dbService.deleteAgent(id);
             toast.success('Distributor record removed');
-            fetchAll();
+            // Optimistic: remove from state
+            setDistributors(prev => prev.filter(d => d.$id !== id));
         } catch (e) {
             toast.error(e.message);
         }
@@ -224,7 +240,11 @@ export default function DistributorsPage() {
                 await dbService.deleteExpense(originalId);
                 toast.success('Record deleted');
                 setViewingDist(null);
-                fetchAll();
+                // Optimistic: remove expense from state and update distributor balance
+                setExpenseRecs(prev => prev.filter(e => e.$id !== originalId));
+                if (viewingDist) {
+                    setDistributors(prev => prev.map(d => d.$id === viewingDist.$id ? { ...d, inr_balance: round2((Number(d.inr_balance) || 0) + undoBal) } : d));
+                }
             } else if (ev.type === 'commission') {
                 // Commissions are just tx expenses. Handled by transaction deletions mostly, but if it's standalone, we delete the expense.
                 toast.error('Commissions are tied to transactions. Please delete the transaction.');

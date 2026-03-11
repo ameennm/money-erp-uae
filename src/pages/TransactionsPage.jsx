@@ -174,6 +174,8 @@ export default function TransactionsPage() {
                     payload.edit_pending_approval = true;
                     await dbService.updateTransaction(editTx.$id, payload);
                     toast.success('Edit submitted — awaiting admin approval');
+                    // Optimistic: update tx in state
+                    setTxs(prev => prev.map(t => t.$id === editTx.$id ? { ...t, ...payload } : t));
                 } else {
                     payload.edit_pending_approval = false;
 
@@ -229,6 +231,8 @@ export default function TransactionsPage() {
 
                     await dbService.updateTransaction(editTx.$id, payload);
                     toast.success('Transaction Updated successfully');
+                    // Optimistic: update tx in state
+                    setTxs(prev => prev.map(t => t.$id === editTx.$id ? { ...t, ...payload } : t));
                 }
             } else {
                 if (!payload.distributor_id) {
@@ -291,11 +295,22 @@ export default function TransactionsPage() {
                     }
                 }
 
-                await dbService.createTransaction(payload);
+                const created = await dbService.createTransaction(payload);
                 toast.success('Transaction Logged');
+                // Optimistic: prepend new tx and update agent balances in state
+                setTxs(prev => [{ ...created, ...payload }, ...prev]);
+                // Update agents state for distributor and collection agent balance changes
+                setAgents(prev => prev.map(a => {
+                    let updated = { ...a };
+                    if (dist && a.$id === dist.$id) updated.inr_balance = round2((dist.inr_balance || 0) - round2(payload.inr_requested));
+                    if (payload.collection_agent_id && a.$id === payload.collection_agent_id) {
+                        if (payload.collected_currency === 'AED') updated.aed_balance = round2((a.aed_balance || 0) + payload.collected_amount);
+                        else updated.sar_balance = round2((a.sar_balance || 0) + payload.collected_amount);
+                    }
+                    return updated;
+                }));
             }
             setModal(false);
-            fetchAll();
         } catch (e) { toast.error(e.message); }
         finally {
             isSavingRef.current = false;
@@ -307,7 +322,8 @@ export default function TransactionsPage() {
         try {
             await dbService.updateTransaction(tx.$id, { edit_pending_approval: false });
             toast.success(`Edit approved for TX #${tx.tx_id}`);
-            fetchAll();
+            // Optimistic: update in state
+            setTxs(prev => prev.map(t => t.$id === tx.$id ? { ...t, edit_pending_approval: false } : t));
         } catch (e) { toast.error('Approve failed: ' + e.message); }
     };
 
@@ -330,7 +346,13 @@ export default function TransactionsPage() {
             });
             toast.success('Conversion Logged');
             setConvertModal(false);
-            fetchAll();
+            // Optimistic: update tx fields in state
+            setTxs(prev => prev.map(t => t.$id === activeTx.$id ? {
+                ...t, sar_to_aed_rate: sarRate, actual_aed: actualAed,
+                status: 'pending_distribution',
+                conversion_agent_id: form.conversion_agent_id,
+                conversion_agent_name: form.conversion_agent_name
+            } : t));
         } catch (e) { toast.error(e.message); }
         finally {
             isSavingRef.current = false;
@@ -378,7 +400,13 @@ export default function TransactionsPage() {
             });
             toast.success('Distribution Complete');
             setDistributeModal(false);
-            fetchAll();
+            // Optimistic: update tx fields in state
+            setTxs(prev => prev.map(t => t.$id === activeTx.$id ? {
+                ...t, aed_to_inr_rate: inrRate, actual_inr_distributed: inrDist,
+                profit_aed: parseFloat(profit), status: 'completed',
+                distributor_id: form.distributor_id || activeTx.distributor_id,
+                distributor_name: form.distributor_name || activeTx.distributor_name
+            } : t));
         } catch (e) { toast.error(e.message); }
         finally {
             isSavingRef.current = false;
@@ -442,7 +470,19 @@ export default function TransactionsPage() {
             }
             await dbService.deleteTransaction(tx.$id);
             toast.success(`Transaction #${tx.tx_id} deleted`);
-            fetchAll();
+            // Optimistic: remove tx and update agent balances in state
+            setTxs(prev => prev.filter(t => t.$id !== tx.$id));
+            setAgents(prev => prev.map(a => {
+                let updated = { ...a };
+                if (tx.status === 'completed' && tx.distributor_id && a.$id === tx.distributor_id) {
+                    updated.inr_balance = round2((Number(a.inr_balance) || 0) + Number(tx.inr_requested));
+                }
+                if (tx.collection_agent_id && a.$id === tx.collection_agent_id) {
+                    if (tx.collected_currency === 'AED') updated.aed_balance = Math.max(0, round2((Number(a.aed_balance) || 0) - Number(tx.collected_amount)));
+                    else updated.sar_balance = Math.max(0, round2((Number(a.sar_balance) || 0) - Number(tx.collected_amount)));
+                }
+                return updated;
+            }));
         } catch (e) {
             toast.error('Delete failed: ' + e.message);
         }

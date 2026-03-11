@@ -96,12 +96,15 @@ export default function AgentsPage() {
             if (editItem) {
                 await dbService.updateAgent(editItem.$id, form);
                 toast.success('Agent updated');
+                // Optimistic: update in state
+                setAgents(prev => prev.map(a => a.$id === editItem.$id ? { ...a, ...form } : a));
             } else {
-                await dbService.createAgent(form);
+                const created = await dbService.createAgent(form);
                 toast.success('Agent added');
+                // Optimistic: prepend new agent
+                setAgents(prev => [{ ...created, ...form }, ...prev]);
             }
             setModal(false);
-            fetch();
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -114,7 +117,8 @@ export default function AgentsPage() {
         try {
             await dbService.deleteAgent(id);
             toast.success('Deleted');
-            fetch();
+            // Optimistic: remove from state
+            setAgents(prev => prev.filter(a => a.$id !== id));
         } catch (e) {
             toast.error(e.message);
         }
@@ -143,7 +147,7 @@ export default function AgentsPage() {
             await dbService.updateAgent(paymentAgent.$id, { [owedField]: newOwed });
 
             // 2. Record payment as income (increases our SAR/AED balance on dashboard)
-            await dbService.createExpense({
+            const expensePayload = {
                 title: `Agent Payment — ${paymentAgent.name}`,
                 type: 'income',
                 category: 'Agent Payment',
@@ -151,11 +155,14 @@ export default function AgentsPage() {
                 currency: cur,
                 date: new Date().toISOString().split('T')[0],
                 notes: `Received ${amt.toLocaleString()} ${cur} from agent ${paymentAgent.name}`,
-            });
+            };
+            const createdExpense = await dbService.createExpense(expensePayload);
 
             toast.success(`✅ Recorded ${amt.toLocaleString()} ${cur} received from ${paymentAgent.name}`);
             setPaymentModal(false);
-            fetch();
+            // Optimistic: update agent balance and add expense record to state
+            setAgents(prev => prev.map(a => a.$id === paymentAgent.$id ? { ...a, [owedField]: newOwed } : a));
+            setExpenseRecs(prev => [{ ...createdExpense, ...expensePayload }, ...prev]);
         } catch (err) {
             toast.error('Failed: ' + err.message);
         } finally {
@@ -175,12 +182,17 @@ export default function AgentsPage() {
                     const undoBal = Number(r.amount);
                     if (undoBal) {
                         const balField = viewingAgent.currency === 'AED' ? 'aed_balance' : 'sar_balance';
-                        await dbService.updateAgent(viewingAgent.$id, { [balField]: round2((Number(viewingAgent[balField]) || 0) + undoBal) });
+                        const newBal = round2((Number(viewingAgent[balField]) || 0) + undoBal);
+                        await dbService.updateAgent(viewingAgent.$id, { [balField]: newBal });
+                        // Optimistic: update agent balance in state
+                        setAgents(prev => prev.map(a => a.$id === viewingAgent.$id ? { ...a, [balField]: newBal } : a));
+                        setViewingAgent(prev => ({ ...prev, [balField]: newBal }));
                     }
                 }
                 await dbService.deleteExpense(r.$id);
                 toast.success('Payment deleted');
-                fetch();
+                // Optimistic: remove expense from state
+                setExpenseRecs(prev => prev.filter(e => e.$id !== r.$id));
             }
         } catch (err) {
             toast.error(err.message);

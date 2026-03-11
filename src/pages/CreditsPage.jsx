@@ -61,24 +61,29 @@ export default function CreditsPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            await dbService.createCredit({
+            const payload = {
                 from_person: form.from_person,
                 reason: form.reason,
                 amount_sar: parseFloat(form.amount_sar) || 0,
                 date: format(new Date(), 'yyyy-MM-dd'),
                 admin_approved: role === 'admin',
-            });
+            };
+            const created = await dbService.createCredit(payload);
             toast.success('Credit recorded');
             setModal(false);
             setForm(EMPTY_CREDIT);
-            fetch();
+            // Optimistic: prepend new record to state
+            setCredits(prev => [{ ...created, ...payload }, ...prev]);
         } catch (e) { toast.error(e.message); }
         finally { setSaving(false); }
     };
 
     const handleDelete = async (id) => {
         if (!window.confirm('Delete this credit entry?')) return;
-        try { await dbService.deleteCredit(id); toast.success('Deleted'); fetch(); }
+        try { await dbService.deleteCredit(id); toast.success('Deleted');
+            // Optimistic: remove from state
+            setCredits(prev => prev.filter(c => c.$id !== id));
+        }
         catch (e) { toast.error(e.message); }
     };
 
@@ -197,7 +202,8 @@ export default function CreditsPage() {
                                                         onClick={async () => {
                                                             await dbService.updateCredit(c.$id, { admin_approved: true });
                                                             toast.success('Credit Approved');
-                                                            fetch();
+                                                            // Optimistic: update in state
+                                                            setCredits(prev => prev.map(cr => cr.$id === c.$id ? { ...cr, admin_approved: true } : cr));
                                                         }}
                                                     >
                                                         Approve

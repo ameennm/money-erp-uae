@@ -295,10 +295,18 @@ export default function ConversionAgentsPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            if (editItem) { await dbService.updateAgent(editItem.$id, form); toast.success('Updated'); }
-            else { await dbService.createAgent(form); toast.success('Conversion agent added'); }
+            if (editItem) {
+                await dbService.updateAgent(editItem.$id, form);
+                toast.success('Updated');
+                // Optimistic: update in state
+                setAgents(prev => prev.map(a => a.$id === editItem.$id ? { ...a, ...form } : a));
+            } else {
+                const created = await dbService.createAgent(form);
+                toast.success('Conversion agent added');
+                // Optimistic: prepend new agent
+                setAgents(prev => [{ ...created, ...form }, ...prev]);
+            }
             setModal(false);
-            fetchAll();
         } catch (e) { toast.error(e.message); }
         finally { setSaving(false); }
     };
@@ -314,7 +322,9 @@ export default function ConversionAgentsPage() {
             await Promise.all(agentRecs.map(r => dbService.deleteAedConversion(r.$id)));
             await dbService.deleteAgent(agent.$id);
             toast.success(`Deleted agent + ${agentRecs.length} conversion record(s)`);
-            fetchAll();
+            // Optimistic: remove from state
+            setAgents(prev => prev.filter(a => a.$id !== agent.$id));
+            setConvRecs(prev => prev.filter(r => r.conversion_agent_id !== agent.$id));
         } catch (e) { toast.error(e.message); }
     };
 
@@ -369,7 +379,9 @@ export default function ConversionAgentsPage() {
 
             toast.success(`Deposited ${amtIn} ${expenseCur}`);
             setDepositModal(false);
-            fetchAll();
+            // Optimistic: update agent balance and add expense to state
+            setAgents(prev => prev.map(a => a.$id === activeAgent.$id ? { ...a, [balField]: currentBal + amtIn } : a));
+            setExpenseRecs(prev => [{ ...activeAgent, type: 'expense', category: 'Conversion Deposit', amount: amtIn, currency: expenseCur, distributor_name: activeAgent.name }, ...prev]);
         } catch (err) {
             toast.error(err.message);
         } finally {
@@ -413,9 +425,11 @@ export default function ConversionAgentsPage() {
                 })
             ]);
 
-            toast.success(`Received ${amtRec} ${incomeCur}`);
+            toast.success(`Received ${targetAmt.toLocaleString()} ${incomeCur}`);
             setReceiveModal(false);
-            fetchAll();
+            // Optimistic: update agent balance and add expense to state
+            setAgents(prev => prev.map(a => a.$id === activeAgent.$id ? { ...a, [balField]: currentBal - amtSource } : a));
+            setExpenseRecs(prev => [{ type: 'income', category: 'Conversion Receipt', amount: targetAmt, currency: incomeCur, distributor_name: activeAgent.name }, ...prev]);
         } catch (err) {
             toast.error(err.message);
         } finally {
@@ -458,7 +472,12 @@ export default function ConversionAgentsPage() {
                 await dbService.deleteExpense(r.$id);
             }
             toast.success('Record deleted');
-            fetchAll();
+            // Optimistic: remove deleted records from state
+            if (r.record_type === 'bulk_sar_aed') {
+                setConvRecs(prev => prev.filter(cr => cr.$id !== r.$id));
+            } else {
+                setExpenseRecs(prev => prev.filter(e => e.$id !== r.$id && e.$id !== r.inr_expense_id));
+            }
         } catch (err) {
             toast.error(err.message);
         } finally {
