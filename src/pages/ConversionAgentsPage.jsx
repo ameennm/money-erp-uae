@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dbService, Query } from '../lib/appwrite';
+import { authService, dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import {
@@ -29,7 +29,7 @@ const applyDateRange = (arr, range, from, to) => {
     return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
 };
 
-const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED' };
+const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED', sar_balance: 0, aed_balance: 0 };
 
 const CONV_TYPES = [
     { value: 'conversion_sar', label: 'SAR → AED', color: '#4a9eff', bg: 'rgba(74,158,255,0.15)' },
@@ -67,6 +67,7 @@ export default function ConversionAgentsPage() {
     const [activeAgent, setActiveAgent] = useState(null);
     const [actionAmount, setActionAmount] = useState('');
     const [actionRate, setActionRate] = useState('');
+    const [user, setUser] = useState(null);
 
     const fetchAll = async () => {
         setLoading(true);
@@ -84,7 +85,10 @@ export default function ConversionAgentsPage() {
         } catch (e) { toast.error(e.message); }
         finally { setLoading(false); }
     };
-    useEffect(() => { fetchAll(); }, []);
+    useEffect(() => {
+        fetchAll();
+        authService.getCurrentUser().then(setUser);
+    }, []);
 
     // Get all combined records for an agent
     const getAgentConversions = (agentId, agentName, agentType) => {
@@ -119,7 +123,7 @@ export default function ConversionAgentsPage() {
                     sar_amount: t.collected_currency !== 'AED' ? Number(t.collected_amount) : 0,
                     aed_amount: aedAmount,
                     rate: t.sar_to_aed_rate || '',
-                    profit_inr: 0, // Profit is mixed at transaction level, not strictly from conversion
+                    profit_inr: 0,
                     status: t.status,
                 };
             });
@@ -134,7 +138,6 @@ export default function ConversionAgentsPage() {
                 e.currency === 'AED' &&
                 (e.title.includes(agentName) || (e.notes && e.notes.includes(agentName)))
             ).map(e => {
-                // Find the matching INR income expense
                 const inrIncome = expenseRecs.find(inc =>
                     inc.type === 'income' &&
                     inc.category === 'AED→INR Conversion' &&
@@ -169,24 +172,24 @@ export default function ConversionAgentsPage() {
             e.distributor_name === agentName
         ).map(e => {
             let sar_amt = 0; let aed_amt = 0; let inr_amt = 0; let rate = '';
+            let settled_amt = 0;
 
             if (e.category === 'Conversion Deposit') {
-                const rateMatch = e.notes?.match(/@ ([\d.]+)\. Agent owes/);
-                if (rateMatch) rate = rateMatch[1];
-
-                if (e.currency === 'SAR') {
-                    sar_amt = Number(e.amount) || 0;
-                    aed_amt = sar_amt * Number(rate || 0); // They owe this AED
-                } else if (e.currency === 'AED') {
-                    aed_amt = Number(e.amount) || 0;
-                    inr_amt = aed_amt * Number(rate || 0); // They owe this INR
-                }
+                if (e.currency === 'SAR') sar_amt = Number(e.amount) || 0;
+                else aed_amt = Number(e.amount) || 0;
             } else { // Receipt
+                const match = e.notes?.match(/Sourced from ([\d,.]+) /);
+                settled_amt = match ? Number(match[1].replace(/,/g, '')) : 0;
+                
+                const rateMatch = e.notes?.match(/@ ([\d.]+)\)/);
+                rate = rateMatch ? rateMatch[1] : '';
+
                 if (e.currency === 'AED') {
                     aed_amt = Number(e.amount) || 0;
-                }
-                else {
+                    sar_amt = settled_amt;
+                } else {
                     inr_amt = Number(e.amount) || 0;
+                    aed_amt = settled_amt;
                 }
             }
 
@@ -198,6 +201,7 @@ export default function ConversionAgentsPage() {
                 sar_amount: sar_amt,
                 aed_amount: aed_amt,
                 inr_amount: inr_amt,
+                settled_source_amount: settled_amt,
                 rate: rate,
                 profit_inr: 0,
                 status: 'completed',
@@ -209,28 +213,31 @@ export default function ConversionAgentsPage() {
         combined.sort((a, b) => a.date_time - b.date_time);
 
         // Calculate running totals
-        let runningAed = 0;
-        let runningInr = 0;
+        let runningSource = 0;
         let runningProfit = 0;
 
         return combined.map(r => {
             if (agentType === 'conversion_sar') {
-                if (r.record_type.includes('sar_aed') || r.record_type === 'deposit') {
-                    runningAed += r.aed_amount;
+                if (r.record_type === 'deposit') {
+                    runningSource += r.sar_amount;
                 } else if (r.record_type === 'receipt') {
-                    runningAed -= r.aed_amount;
+                    runningSource -= r.settled_source_amount;
+                } else if (r.record_type.includes('sar_aed')) {
+                    // Dashboard conversion counts as settlement for SAR balance
+                    runningSource -= r.sar_amount;
                 }
             } else if (agentType === 'conversion_aed') {
-                if (r.record_type.includes('aed_inr') || r.record_type === 'deposit') {
-                    runningInr += r.inr_amount;
+                if (r.record_type === 'deposit') {
+                    runningSource += r.aed_amount;
                 } else if (r.record_type === 'receipt') {
-                    runningInr -= r.inr_amount;
+                    runningSource -= r.settled_source_amount;
+                } else if (r.record_type.includes('aed_inr')) {
+                    runningSource -= r.aed_amount;
                 }
             }
             runningProfit += r.profit_inr;
 
-            if (Math.abs(runningAed) < 0.001) runningAed = 0;
-            if (Math.abs(runningInr) < 0.001) runningInr = 0;
+            if (Math.abs(runningSource) < 0.001) runningSource = 0;
             if (Math.abs(runningProfit) < 0.001) runningProfit = 0;
 
             let displaySent = 0;
@@ -246,8 +253,9 @@ export default function ConversionAgentsPage() {
 
             return {
                 ...r,
-                running_aed: runningAed,
-                running_inr: runningInr,
+                running_source: runningSource,
+                running_sar: agentType === 'conversion_sar' ? runningSource : 0,
+                running_aed: agentType === 'conversion_aed' ? runningSource : (agentType === 'conversion_sar' ? 0 : 0), // Not used for balance anymore but keep for safety
                 running_profit: runningProfit,
                 display_sent: displaySent,
                 display_received: displayReceived
@@ -269,7 +277,19 @@ export default function ConversionAgentsPage() {
     };
 
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
-    const openEdit = (a) => { setEditItem(a); setForm({ name: a.name || '', phone: a.phone || '', notes: a.notes || '', type: a.type || 'conversion_sar', currency: 'AED' }); setModal(true); };
+    const openEdit = (a) => {
+        setEditItem(a);
+        setForm({
+            name: a.name || '',
+            phone: a.phone || '',
+            notes: a.notes || '',
+            type: a.type || 'conversion_sar',
+            currency: 'AED',
+            sar_balance: a.sar_balance || 0,
+            aed_balance: a.aed_balance || 0
+        });
+        setModal(true);
+    };
 
     const handleSave = async (e) => {
         e.preventDefault();
@@ -310,7 +330,6 @@ export default function ConversionAgentsPage() {
             const expByCur = (cur) => expenseRecs.filter(e => e.type === 'expense' && e.currency === cur).reduce((a, e) => a + (Number(e.amount) || 0), 0);
             const sumF = (arr, field) => arr.reduce((a, r) => a + (Number(r[field]) || 0), 0);
 
-            let newLedgerAmt = 0;
             let expenseCur = '';
             let balField = '';
 
@@ -320,26 +339,22 @@ export default function ConversionAgentsPage() {
                 if (amtIn > (balanceSAR + 0.01)) { // small epsilon for rounding errors
                     throw new Error(`Insufficient SAR! Only ${Math.max(0, balanceSAR).toLocaleString(undefined, { maximumFractionDigits: 2 })} SAR available.`);
                 }
-
-                newLedgerAmt = amtIn * rate; // SAR * Rate = AED
                 expenseCur = 'SAR';
-                balField = 'aed_balance';
+                balField = 'sar_balance';
             } else {
                 const totalAEDFromConversions = sumF(convRecs, 'aed_amount');
                 const balanceAED = incByCur('AED') + totalAEDFromConversions - expByCur('AED');
                 if (amtIn > (balanceAED + 0.01)) { // small epsilon for rounding errors
                     throw new Error(`Insufficient AED! Only ${Math.max(0, balanceAED).toLocaleString(undefined, { maximumFractionDigits: 2 })} AED available.`);
                 }
-
-                newLedgerAmt = amtIn * rate; // AED * Rate = INR
                 expenseCur = 'AED';
-                balField = 'inr_balance';
+                balField = 'aed_balance';
             }
 
             const currentBal = Number(activeAgent[balField]) || 0;
 
             await Promise.all([
-                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal + newLedgerAmt }),
+                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal + amtIn }),
                 dbService.createExpense({
                     title: `Deposit to Conv. Agent — ${activeAgent.name}`,
                     type: 'expense',
@@ -347,7 +362,7 @@ export default function ConversionAgentsPage() {
                     amount: amtIn,
                     currency: expenseCur,
                     date: new Date().toISOString().split('T')[0],
-                    notes: `Deposited ${amtIn} ${expenseCur} @ ${rate}. Agent owes ${newLedgerAmt.toLocaleString()} ${expenseCur === 'SAR' ? 'AED' : 'INR'}`,
+                    notes: `Deposited ${amtIn} ${expenseCur}.`,
                     distributor_name: activeAgent.name
                 })
             ]);
@@ -366,32 +381,34 @@ export default function ConversionAgentsPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            const amtRec = Number(actionAmount);
-            if (!amtRec) throw new Error('Enter valid amount');
+            const amtSource = Number(actionAmount);
+            const rate = Number(actionRate);
+            if (!amtSource || !rate) throw new Error('Enter valid amount and rate');
 
             let incomeCur = '';
             let balField = '';
+            let targetAmt = amtSource * rate;
 
             if (activeAgent.type === 'conversion_sar') {
                 incomeCur = 'AED';
-                balField = 'aed_balance';
+                balField = 'sar_balance';
             } else {
                 incomeCur = 'INR';
-                balField = 'inr_balance';
+                balField = 'aed_balance';
             }
 
             const currentBal = Number(activeAgent[balField]) || 0;
 
             await Promise.all([
-                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal - amtRec }),
+                dbService.updateAgent(activeAgent.$id, { [balField]: currentBal - amtSource }),
                 dbService.createExpense({
                     title: `Receipt from Conv. Agent — ${activeAgent.name}`,
                     type: 'income',
                     category: 'Conversion Receipt',
-                    amount: amtRec,
+                    amount: targetAmt,
                     currency: incomeCur,
                     date: new Date().toISOString().split('T')[0],
-                    notes: `Received ${amtRec} ${incomeCur} from conversion agent`,
+                    notes: `Received ${targetAmt.toLocaleString()} ${incomeCur} (Sourced from ${amtSource} @ ${rate}) from conversion agent`,
                     distributor_name: activeAgent.name
                 })
             ]);
@@ -426,13 +443,15 @@ export default function ConversionAgentsPage() {
                 if (agent) {
                     let undoBal = 0;
                     if (r.record_type === 'deposit') {
-                        const match = r.notes?.match(/Agent owes ([\d,.]+) /);
-                        if (match) undoBal = -Number(match[1].replace(/,/g, ''));
+                        undoBal = -Number(r.amount);
                     } else {
-                        undoBal = Number(r.amount);
+                        // Undo receipt: Add back the source amount to agent balance
+                        const match = r.notes?.match(/Sourced from ([\d,.]+) /);
+                        if (match) undoBal = Number(match[1].replace(/,/g, ''));
+                        else undoBal = Number(r.amount); // fallback
                     }
                     if (undoBal !== 0 && undoBal && !isNaN(undoBal)) {
-                        const balField = agent.type === 'conversion_sar' ? 'aed_balance' : 'inr_balance';
+                        const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
                         await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + undoBal });
                     }
                 }
@@ -527,8 +546,8 @@ export default function ConversionAgentsPage() {
                             <tbody>
                                 {agents.filter(a => a.type === activeTab).map((a, i) => {
                                     const s = agentStats(a);
-                                    const bal = activeTab === 'conversion_sar' ? (a.aed_balance || 0) : (a.inr_balance || 0);
-                                    const balCur = activeTab === 'conversion_sar' ? 'AED' : 'INR';
+                                    const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
+                                    const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
 
                                     return (
                                         <tr key={a.$id}>
@@ -563,8 +582,8 @@ export default function ConversionAgentsPage() {
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setDepositModal(true); }}>Deposit</button>
-                                                    <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setReceiveModal(true); }}>Receive</button>
+                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate('1'); setDepositModal(true); }}>Deposit</button>
+                                                    <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Receive</button>
                                                 </div>
                                             </td>
                                             <td>
@@ -591,7 +610,7 @@ export default function ConversionAgentsPage() {
                                         ₹{agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + agentStats(a).profit, 0).toLocaleString('en-IN')}
                                     </td>
                                     <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.aed_balance || 0) : (a.inr_balance || 0)), 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'AED' : 'INR'}</span>
+                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0)), 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'SAR' : 'AED'}</span>
                                     </td>
                                     <td colSpan={2}></td>
                                 </tr>
@@ -610,10 +629,10 @@ export default function ConversionAgentsPage() {
                     const rows = filteredTxs.map((r, idx) => ({
                         '#': idx + 1,
                         'Date': r.date || '',
-                        'SAR Sent': Number(r.display_sent),
-                        'Rate': r.sar_rate,
-                        'Received': Number(r.display_received),
-                        'Running Balance': Number(viewingAgent.type === 'conversion_aed' ? r.running_inr : r.running_aed),
+                         'SAR Sent': Number(r.display_sent),
+                         'Rate': r.rate,
+                         'Received': Number(r.display_received),
+                         'Running Balance': Number(viewingAgent.type === 'conversion_aed' ? r.running_aed : r.running_sar),
                         'Profit INR': Number(r.profit_inr || 0),
                         'Notes': r.notes || '',
                     }));
@@ -704,8 +723,8 @@ export default function ConversionAgentsPage() {
                                                             <td style={{ textAlign: 'right', color: r.profit_inr >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)', fontWeight: 600 }}>
                                                                 {r.profit_inr ? (r.profit_inr >= 0 ? '+' : '') + '₹' + Number(r.profit_inr).toLocaleString('en-IN') : '—'}
                                                             </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 800, color: (isAedToInr ? r.running_inr : r.running_aed) >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                                                {(isAedToInr ? r.running_inr : r.running_aed) < 0 ? '-' : ''}{Math.abs(Number(isAedToInr ? r.running_inr : r.running_aed)).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isAedToInr ? 'INR' : 'AED'}</span>
+                                                            <td style={{ textAlign: 'right', fontWeight: 800, color: (isAedToInr ? r.running_aed : r.running_sar) >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                                                {(isAedToInr ? r.running_aed : r.running_sar) < 0 ? '-' : ''}{Math.abs(Number(isAedToInr ? r.running_aed : r.running_sar)).toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isAedToInr ? 'AED' : 'SAR'}</span>
                                                             </td>
                                                             <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {r.notes || r.client_name || '—'}
@@ -788,10 +807,31 @@ export default function ConversionAgentsPage() {
                                     <input id="ca-name" className="form-input" placeholder="Agent name"
                                         value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Phone</label>
-                                    <input id="ca-phone" className="form-input" placeholder="+966 5X XXX XXXX"
-                                        value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+                                <div className="form-row" style={{ display: 'flex', gap: 12 }}>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label className="form-label">Phone</label>
+                                        <input id="ca-phone" className="form-input" placeholder="+966 5X XXX XXXX"
+                                            value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+                                    </div>
+                                    {(user?.role === 'admin' || user?.role === 'collector') && (
+                                        <div className="form-group" style={{ flex: 1 }}>
+                                            <label className="form-label">
+                                                Balance ({form.type === 'conversion_sar' ? 'SAR' : 'AED'})
+                                            </label>
+                                            <input
+                                                className="form-input"
+                                                type="number"
+                                                step="any"
+                                                value={form.type === 'conversion_sar' ? form.sar_balance : form.aed_balance}
+                                                onChange={e => {
+                                                    const val = parseFloat(e.target.value) || 0;
+                                                    if (form.type === 'conversion_sar') setForm({ ...form, sar_balance: val });
+                                                    else setForm({ ...form, aed_balance: val });
+                                                }}
+                                                style={{ border: '1px solid var(--brand-accent)', background: 'rgba(0,255,150,0.05)' }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Notes</label>
@@ -845,8 +885,8 @@ export default function ConversionAgentsPage() {
                                 </div>
                                 <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent's Owed Debt:</span>
-                                    <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? 'var(--brand-gold)' : 'var(--text-primary)' }}>
-                                        {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED` : `₹${(Number(activeAgent.inr_balance) || 0).toLocaleString('en-IN')}`}
+                                    <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? '#4a9eff' : 'var(--brand-gold)' }}>
+                                        {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.sar_balance) || 0).toLocaleString()} SAR` : `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED`}
                                     </span>
                                 </div>
                                 <div className="form-group">
@@ -854,16 +894,9 @@ export default function ConversionAgentsPage() {
                                     <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
                                         value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Fixed Exchange Rate</label>
-                                    <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
-                                        value={actionRate} onChange={e => setActionRate(e.target.value)} />
+                                <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 13, color: '#4a9eff' }}>
+                                    Money will stay in <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> until you receive converted funds from the agent.
                                 </div>
-                                {actionAmount && actionRate && (
-                                    <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
-                                        Agent will owe us: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}
-                                    </div>
-                                )}
                                 <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                                     <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
                                     <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
@@ -886,20 +919,30 @@ export default function ConversionAgentsPage() {
                         </div>
                         <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleReceiveSubmit}>
                             <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-                                This will credit <b>{activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'}</b> to our local ledger
-                                and decrease {activeAgent.name}'s owed balance. (If we receive more than they owe, their balance will go negative indicating we owe them.)
+                                Specify how much <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> is being cleared
+                                and at what rate. The resulting {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be credited to our ledger.
                             </p>
                             <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Current Balance:</span>
-                                <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? 'var(--brand-gold)' : 'var(--text-primary)' }}>
-                                    {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED` : `₹${(Number(activeAgent.inr_balance) || 0).toLocaleString('en-IN')}`}
+                                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Currently Owed:</span>
+                                <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? '#4a9eff' : 'var(--brand-gold)' }}>
+                                    {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.sar_balance) || 0).toLocaleString()} SAR` : `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED`}
                                 </span>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Amount Received ({activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'})</label>
+                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Source Amount Settled ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
                                 <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
                                     value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
                             </div>
+                            <div className="form-group">
+                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Exchange Rate</label>
+                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                    value={actionRate} onChange={e => setActionRate(e.target.value)} />
+                            </div>
+                            {actionAmount && actionRate && (
+                                <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
+                                    Result: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be added to ledger
+                                </div>
+                            )}
                             <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                                 <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setReceiveModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>

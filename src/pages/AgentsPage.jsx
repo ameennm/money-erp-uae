@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dbService, Query } from '../lib/appwrite';
+import { authService, dbService, Query } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, MessageCircle, Banknote, Download } from 'lucide-react';
@@ -28,7 +28,7 @@ const applyDateRange = (arr, range, from, to) => {
 
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
-const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection' };
+const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection', sar_balance: 0, aed_balance: 0 };
 
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
@@ -46,6 +46,7 @@ export default function AgentsPage() {
     const [paymentModal, setPaymentModal] = useState(false);
     const [paymentAgent, setPaymentAgent] = useState(null);
     const [paymentAmount, setPaymentAmount] = useState('');
+    const [user, setUser] = useState(null);
 
     const fetch = async () => {
         setLoading(true);
@@ -65,12 +66,24 @@ export default function AgentsPage() {
         }
     };
 
-    useEffect(() => { fetch(); }, []);
+    useEffect(() => {
+        fetch();
+        authService.getCurrentUser().then(setUser);
+    }, []);
 
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (a) => {
         setEditItem(a);
-        setForm({ name: a.name || '', phone: a.phone || '', location: a.location || '', notes: a.notes || '', currency: a.currency || 'SAR', type: a.type || 'collection' });
+        setForm({
+            name: a.name || '',
+            phone: a.phone || '',
+            location: a.location || '',
+            notes: a.notes || '',
+            currency: a.currency || 'SAR',
+            type: a.type || 'collection',
+            sar_balance: a.sar_balance || 0,
+            aed_balance: a.aed_balance || 0
+        });
         setModal(true);
     };
 
@@ -665,6 +678,28 @@ export default function AgentsPage() {
                                             <option value="AED">AED</option>
                                         </select>
                                     </div>
+                                    {(user?.role === 'admin' || user?.role === 'collector') && (
+                                        <div className="form-group">
+                                            <label className="form-label">
+                                                Manual Balance Adjustment ({form.currency})
+                                            </label>
+                                            <input
+                                                className="form-input"
+                                                type="number"
+                                                step="any"
+                                                value={form.currency === 'SAR' ? form.sar_balance : form.aed_balance}
+                                                onChange={e => {
+                                                    const val = parseFloat(e.target.value) || 0;
+                                                    if (form.currency === 'SAR') setForm({ ...form, sar_balance: val });
+                                                    else setForm({ ...form, aed_balance: val });
+                                                }}
+                                                style={{ border: '1px solid var(--brand-accent)', background: 'rgba(0,255,150,0.05)' }}
+                                            />
+                                            <div style={{ fontSize: 10, color: 'var(--brand-accent)', marginTop: 4 }}>
+                                                ⚠️ Admin only: Directly overwrites the agent's debt.
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Notes</label>
