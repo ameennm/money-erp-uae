@@ -111,7 +111,7 @@ export default function DashboardPage() {
 
         setSaving(true);
         try {
-            const aedAmount = targetAmount * rate;
+            const aedAmount = targetAmount / rate;
 
             const created = await dbService.createAedConversion({
                 sar_amount: safeFloat(targetAmount),
