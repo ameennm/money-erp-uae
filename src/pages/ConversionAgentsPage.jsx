@@ -761,10 +761,11 @@ export default function ConversionAgentsPage() {
                                                                 {r.notes || r.client_name || '—'}
                                                             </td>
                                                             <td style={{ textAlign: 'center' }}>
-                                                                <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                                <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={(e) => {
+                                                                    e.stopPropagation();
                                                                     if (r.record_type === 'tx_sar_aed') window.open(`/transactions?q=${r.tx_id}`, '_blank');
                                                                     else if (r.record_type === 'bulk_aed_inr') window.open(`/expenses`, '_blank');
-                                                                    else if (r.record_type === 'deposit' || r.record_type === 'receipt') window.open(`/reports`, '_blank');
+                                                                    else if (r.record_type === 'deposit' || r.record_type === 'receipt') window.open(`/expenses`, '_blank');
                                                                     else toast.error('Bulk SAR->AED edits not yet implemented here');
                                                                 }}>
                                                                     <Pencil size={12} />
