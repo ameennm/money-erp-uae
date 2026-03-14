@@ -210,18 +210,57 @@ export default function TransactionsPage() {
                     const oldCur = editTx.collected_currency || 'SAR';
                     const newCur = payload.collected_currency || 'SAR';
 
-                    if (oldAgentId) {
-                        const oldAgent = agents.find(a => a.$id === oldAgentId);
-                        if (oldAgent) {
-                            const balField = oldCur === 'AED' ? 'aed_balance' : 'sar_balance';
-                            await dbService.updateAgent(oldAgent.$id, { [balField]: Math.max(0, round2((oldAgent[balField] || 0) - oldColAmt)) });
+                    if (oldAgentId === newAgentId && newAgentId && oldCur === newCur) {
+                        const deltaCol = newColAmt - oldColAmt;
+                        const colAgent = agents.find(a => a.$id === newAgentId);
+                        if (colAgent && deltaCol !== 0) {
+                            const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
+                            await dbService.updateAgent(colAgent.$id, { [balField]: Math.max(0, round2((colAgent[balField] || 0) + deltaCol)) });
+                        }
+                    } else {
+                        if (oldAgentId) {
+                            const oldAgent = agents.find(a => a.$id === oldAgentId);
+                            if (oldAgent) {
+                                const balField = oldCur === 'AED' ? 'aed_balance' : 'sar_balance';
+                                await dbService.updateAgent(oldAgent.$id, { [balField]: Math.max(0, round2((oldAgent[balField] || 0) - oldColAmt)) });
+                            }
+                        }
+                        if (newAgentId) {
+                            const newAgent = agents.find(a => a.$id === newAgentId);
+                            if (newAgent) {
+                                const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
+                                await dbService.updateAgent(newAgent.$id, { [balField]: round2((newAgent[balField] || 0) + newColAmt) });
+                            }
                         }
                     }
-                    if (newAgentId) {
-                        const newAgent = agents.find(a => a.$id === newAgentId);
-                        if (newAgent) {
-                            const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
-                            await dbService.updateAgent(newAgent.$id, { [balField]: round2((newAgent[balField] || 0) + newColAmt) });
+
+                    // ── Update Conversion Agent Balances ──
+                    const oldConvId = editTx.conversion_agent_id;
+                    const newConvId = payload.conversion_agent_id;
+                    const oldConvAmt = Number(editTx.collected_amount) || 0;
+                    const newConvAmt = Number(payload.collected_amount) || 0;
+
+                    if (oldConvId === newConvId && newConvId) {
+                        const deltaConv = newConvAmt - oldConvAmt;
+                        const convAgent = agents.find(a => a.$id === newConvId);
+                        if (convAgent && deltaConv !== 0) {
+                            const balField = convAgent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                            await dbService.updateAgent(convAgent.$id, { [balField]: Math.max(0, round2((convAgent[balField] || 0) + deltaConv)) });
+                        }
+                    } else {
+                        if (oldConvId) {
+                            const oldConv = agents.find(a => a.$id === oldConvId);
+                            if (oldConv) {
+                                const balField = oldConv.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                                await dbService.updateAgent(oldConv.$id, { [balField]: Math.max(0, round2((oldConv[balField] || 0) - oldConvAmt)) });
+                            }
+                        }
+                        if (newConvId) {
+                            const newConv = agents.find(a => a.$id === newConvId);
+                            if (newConv) {
+                                const balField = newConv.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                                await dbService.updateAgent(newConv.$id, { [balField]: round2((newConv[balField] || 0) + newConvAmt) });
+                            }
                         }
                     }
 
@@ -335,7 +374,7 @@ export default function TransactionsPage() {
         setSaving(true);
         try {
             const sarRate = parseFloat(form.sar_to_aed_rate);
-            const actualAed = activeTx.collected_amount * sarRate;
+            const actualAed = activeTx.collected_amount / sarRate;
 
             await dbService.updateTransaction(activeTx.$id, {
                 sar_to_aed_rate: sarRate,
@@ -468,6 +507,22 @@ export default function TransactionsPage() {
                     }
                 }
             }
+
+            // Reverse conversion agent balance
+            if (tx.conversion_agent_id && tx.collected_amount) {
+                const convAgent = agents.find(a => a.$id === tx.conversion_agent_id);
+                if (convAgent) {
+                    // Reduce the conversion agent's balance since the conversion is undone
+                    if (convAgent.type === 'conversion_sar') {
+                        const newSarBal = round2((Number(convAgent.sar_balance) || 0) - Number(tx.collected_amount));
+                        await dbService.updateAgent(convAgent.$id, { sar_balance: Math.max(0, newSarBal) });
+                    } else {
+                        const newAedBal = round2((Number(convAgent.aed_balance) || 0) - Number(tx.collected_amount)); // Or actual AED amount depending on currency
+                        await dbService.updateAgent(convAgent.$id, { aed_balance: Math.max(0, newAedBal) });
+                    }
+                }
+            }
+
             await dbService.deleteTransaction(tx.$id);
             toast.success(`Transaction #${tx.tx_id} deleted`);
             // Optimistic: remove tx and update agent balances in state
@@ -480,6 +535,10 @@ export default function TransactionsPage() {
                 if (tx.collection_agent_id && a.$id === tx.collection_agent_id) {
                     if (tx.collected_currency === 'AED') updated.aed_balance = Math.max(0, round2((Number(a.aed_balance) || 0) - Number(tx.collected_amount)));
                     else updated.sar_balance = Math.max(0, round2((Number(a.sar_balance) || 0) - Number(tx.collected_amount)));
+                }
+                if (tx.conversion_agent_id && a.$id === tx.conversion_agent_id) {
+                    if (a.type === 'conversion_sar') updated.sar_balance = Math.max(0, round2((Number(a.sar_balance) || 0) - Number(tx.collected_amount)));
+                    else updated.aed_balance = Math.max(0, round2((Number(a.aed_balance) || 0) - Number(tx.collected_amount)));
                 }
                 return updated;
             }));
@@ -794,7 +853,7 @@ export default function TransactionsPage() {
                                         placeholder="e.g. 0.98" />
                                 </div>
                                 {form.sar_to_aed_rate > 0 && (
-                                    <p className="mt-2 text-accent">Result: <strong>{(activeTx.collected_amount * form.sar_to_aed_rate).toFixed(2)} AED</strong></p>
+                                    <p className="mt-2 text-accent">Result: <strong>{(activeTx.collected_amount / form.sar_to_aed_rate).toFixed(2)} AED</strong></p>
                                 )}
                             </div>
                             <div className="modal-footer">

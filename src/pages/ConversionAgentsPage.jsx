@@ -399,14 +399,16 @@ export default function ConversionAgentsPage() {
 
             let incomeCur = '';
             let balField = '';
-            let targetAmt = amtSource * rate;
+            let targetAmt = 0;
 
             if (activeAgent.type === 'conversion_sar') {
                 incomeCur = 'AED';
                 balField = 'sar_balance';
+                targetAmt = amtSource / rate;
             } else {
                 incomeCur = 'INR';
                 balField = 'aed_balance';
+                targetAmt = amtSource * rate;
             }
 
             const currentBal = Number(activeAgent[balField]) || 0;
@@ -461,8 +463,18 @@ export default function ConversionAgentsPage() {
                     } else {
                         // Undo receipt: Add back the source amount to agent balance
                         const match = r.notes?.match(/Sourced from ([\d,.]+) /);
-                        if (match) undoBal = Number(match[1].replace(/,/g, ''));
-                        else undoBal = Number(r.amount); // fallback
+                        if (match) {
+                            undoBal = Number(match[1].replace(/,/g, ''));
+                        } else {
+                            // fallback
+                            const rateMatch = r.notes?.match(/@ ([\d,.]+)\)/);
+                            const rate = rateMatch ? Number(rateMatch[1].replace(/,/g, '')) : 1;
+                            if (agent.type === 'conversion_sar') {
+                                undoBal = Number(r.amount) * rate;
+                            } else {
+                                undoBal = Number(r.amount) / rate;
+                            }
+                        }
                     }
                     if (undoBal !== 0 && undoBal && !isNaN(undoBal)) {
                         const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
@@ -959,7 +971,7 @@ export default function ConversionAgentsPage() {
                             </div>
                             {actionAmount && actionRate && (
                                 <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
-                                    Result: {(Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be added to ledger
+                                    Result: {activeAgent.type === 'conversion_sar' ? (Number(actionAmount) / Number(actionRate)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be added to ledger
                                 </div>
                             )}
                             <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
