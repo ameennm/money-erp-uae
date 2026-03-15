@@ -69,6 +69,11 @@ export default function ConversionAgentsPage() {
     const [actionRate, setActionRate] = useState('');
     const [user, setUser] = useState(null);
 
+    // Record Edit Modal State
+    const [editRecordModal, setEditRecordModal] = useState(false);
+    const [editingRecord, setEditingRecord] = useState(null);
+    const [editRecordForm, setEditRecordForm] = useState({ amount: '', rate: '', notes: '' });
+
     const fetchAll = async () => {
         setLoading(true);
         try {
@@ -439,6 +444,131 @@ export default function ConversionAgentsPage() {
         }
     };
 
+    const handleEditRecord = (r) => {
+        setEditingRecord(r);
+        let amount = 0;
+        if (r.record_type === 'tx_sar_aed') amount = r.collected_amount;
+        else if (r.record_type === 'bulk_sar_aed') amount = r.sar_amount;
+        else if (r.record_type === 'bulk_aed_inr') amount = r.aed_amount;
+        else if (r.record_type === 'deposit') amount = r.amount;
+        else if (r.record_type === 'receipt') {
+            const match = r.notes?.match(/Sourced from ([\d,.]+) /);
+            amount = match ? Number(match[1].replace(/,/g, '')) : r.amount;
+        }
+
+        setEditRecordForm({
+            amount: amount,
+            rate: r.rate || '',
+            notes: r.notes || r.client_name || ''
+        });
+        setEditRecordModal(true);
+    };
+
+    const handleUpdateRecord = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const r = editingRecord;
+            const newAmt = Number(editRecordForm.amount);
+            const newRate = Number(editRecordForm.rate);
+            const newNotes = editRecordForm.notes;
+
+            if (r.record_type === 'tx_sar_aed') {
+                const oldAmt = Number(r.collected_amount);
+                const oldRate = Number(r.rate);
+                const diff = newAmt - oldAmt;
+                
+                // Recalculate profit if applicable
+                const aedToInr = Number(r.aed_to_inr_rate) || 0;
+                const inrDist = Number(r.actual_inr_distributed) || 0;
+                let profitAed = 0;
+                if (aedToInr > 0) {
+                    const actualAedValue = newAmt / newRate;
+                    const aedCostOfInr = (inrDist / 1000) * aedToInr;
+                    profitAed = Number((actualAedValue - aedCostOfInr).toFixed(2));
+                }
+
+                // Update transaction
+                const updatedFields = {
+                    collected_amount: newAmt,
+                    sar_to_aed_rate: newRate,
+                    actual_aed: newAmt / newRate,
+                    notes: newNotes,
+                    ...(profitAed !== 0 ? { profit_aed: profitAed } : {})
+                };
+                await dbService.updateTransaction(r.$id, updatedFields);
+                
+                // Update Agent balance (Conversion Agent)
+                const agent = agents.find(a => a.$id === r.conversion_agent_id);
+                if (agent && diff !== 0) {
+                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + diff });
+                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) + diff } : a));
+                }
+
+                // Update Collection Agent balance
+                const colAgentId = r.collection_agent_id;
+                if (colAgentId && diff !== 0) {
+                    const colAgent = agents.find(a => a.$id === colAgentId);
+                    if (colAgent) {
+                        const colBalField = r.collected_currency === 'AED' ? 'aed_balance' : 'sar_balance';
+                        await dbService.updateAgent(colAgent.$id, { [colBalField]: Math.max(0, (Number(colAgent[colBalField]) || 0) + diff) });
+                        setAgents(prev => prev.map(a => a.$id === colAgent.$id ? { ...a, [colBalField]: Math.max(0, (Number(a[colBalField]) || 0) + diff) } : a));
+                    }
+                }
+                setTxs(prev => prev.map(t => t.$id === r.$id ? { ...t, ...updatedFields } : t));
+
+            } else if (r.record_type === 'deposit') {
+                const oldAmt = Number(r.amount);
+                const diff = newAmt - oldAmt;
+                await dbService.updateExpense(r.$id, { amount: newAmt, notes: newNotes });
+                
+                const agent = agents.find(a => a.name === r.distributor_name);
+                if (agent && diff !== 0) {
+                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + diff });
+                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) + diff } : a));
+                }
+                setExpenseRecs(prev => prev.map(ex => ex.$id === r.$id ? { ...ex, amount: newAmt, notes: newNotes } : ex));
+
+            } else if (r.record_type === 'receipt') {
+                const oldMatch = r.notes?.match(/Sourced from ([\d,.]+) /);
+                const oldSourceAmt = oldMatch ? Number(oldMatch[1].replace(/,/g, '')) : 0;
+                const diff = newAmt - oldSourceAmt;
+
+                let incomeCur = r.currency;
+                let targetAmt = 0;
+                if (viewingAgent.type === 'conversion_sar') {
+                    targetAmt = newAmt / newRate;
+                } else {
+                    targetAmt = newAmt * newRate;
+                }
+
+                const updatedNotes = `Received ${targetAmt.toLocaleString()} ${incomeCur} (Sourced from ${newAmt} @ ${newRate}) from conversion agent`;
+                await dbService.updateExpense(r.$id, { amount: targetAmt, notes: updatedNotes });
+
+                const agent = agents.find(a => a.name === r.distributor_name);
+                if (agent && diff !== 0) {
+                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
+                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) - diff });
+                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) - diff } : a));
+                }
+                setExpenseRecs(prev => prev.map(ex => ex.$id === r.$id ? { ...ex, amount: targetAmt, notes: updatedNotes } : ex));
+            } else {
+                 toast.error('Bulk record editing not yet implemented');
+                 setSaving(false);
+                 return;
+            }
+
+            toast.success('Record updated');
+            setEditRecordModal(false);
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleDeleteRecord = async (e, r) => {
         e.stopPropagation();
         if (!window.confirm('Delete this record? This cannot be undone.')) return;
@@ -760,13 +890,10 @@ export default function ConversionAgentsPage() {
                                                             <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                 {r.notes || r.client_name || '—'}
                                                             </td>
-                                                            <td style={{ textAlign: 'center' }}>
+                                                            <td style={{ textAlign: 'right' }}>
                                                                 <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    if (r.record_type === 'tx_sar_aed') window.open(`/transactions?q=${r.tx_id}`, '_blank');
-                                                                    else if (r.record_type === 'bulk_aed_inr') window.open(`/expenses`, '_blank');
-                                                                    else if (r.record_type === 'deposit' || r.record_type === 'receipt') window.open(`/expenses`, '_blank');
-                                                                    else toast.error('Bulk SAR->AED edits not yet implemented here');
+                                                                    handleEditRecord(r);
                                                                 }}>
                                                                     <Pencil size={12} />
                                                                 </button>
@@ -987,6 +1114,42 @@ export default function ConversionAgentsPage() {
             )
             }
 
+            {/* Record Edit Modal */}
+            {editRecordModal && editingRecord && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditRecordModal(false)}>
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3 className="modal-title">Edit {editingRecord.record_type.replace(/_/g, ' ').toUpperCase()}</h3>
+                            <button className="close-btn" onClick={() => setEditRecordModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleUpdateRecord}>
+                            <div className="modal-body">
+                                <div className="form-group">
+                                    <label className="form-label">Amount ({viewingAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
+                                    <input className="form-input" type="number" step="0.01" required
+                                        value={editRecordForm.amount} onChange={e => setEditRecordForm({ ...editRecordForm, amount: e.target.value })} />
+                                </div>
+                                {editingRecord.record_type !== 'deposit' && (
+                                    <div className="form-group">
+                                        <label className="form-label">Rate</label>
+                                        <input className="form-input" type="number" step="0.0001" required
+                                            value={editRecordForm.rate} onChange={e => setEditRecordForm({ ...editRecordForm, rate: e.target.value })} />
+                                    </div>
+                                )}
+                                <div className="form-group">
+                                    <label className="form-label">Notes</label>
+                                    <textarea className="form-input" rows="3"
+                                        value={editRecordForm.notes} onChange={e => setEditRecordForm({ ...editRecordForm, notes: e.target.value })}></textarea>
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-outline" onClick={() => setEditRecordModal(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-accent" disabled={saving}>Update Record</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </Layout >
     );
 }

@@ -114,6 +114,7 @@ export const dbService = {
         return applyQueries(data, q);
     },
     async createExpense(data) { return fetchApi('/expenses', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateExpense(id, data) { return fetchApi(`/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
     async deleteExpense(id) { return fetchApi(`/expenses/${id}`, { method: 'DELETE' }); },
 
     // Credits
