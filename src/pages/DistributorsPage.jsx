@@ -46,6 +46,7 @@ export default function DistributorsPage() {
     const [transferFrom, setTransferFrom] = useState(null);
     const [transferTo, setTransferTo] = useState('');
     const [transferAmount, setTransferAmount] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
 
     const fetchAll = async () => {
@@ -259,11 +260,26 @@ export default function DistributorsPage() {
     return (
         <Layout title="Distributors">
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-                <div>
-                    <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                        {distributors.length} distributor{distributors.length !== 1 ? 's' : ''}
-                    </h3>
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Distributors handle the final payout of INR to clients.</p>
+                <div className="flex items-center gap-4 flex-1">
+                    <div>
+                        <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                            {distributors.length} distributor{distributors.length !== 1 ? 's' : ''}
+                        </h3>
+                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Distributors handle the final payout of INR to clients.</p>
+                    </div>
+                    <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
+                        <input
+                            type="text"
+                            placeholder="Search distributors..."
+                            className="form-input"
+                            style={{ paddingLeft: '36px' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </span>
+                    </div>
                 </div>
                 <button id="new-dist-btn" className="btn btn-accent" onClick={openNew}>
                     <Plus size={16} /> Add Distributor
@@ -296,7 +312,12 @@ export default function DistributorsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {distributors.map((dist, i) => {
+                                {distributors
+                                    .filter(d => 
+                                        d.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                        d.phone?.toLowerCase().includes(searchTerm.toLowerCase())
+                                    )
+                                    .map((dist, i) => {
                                     const distTxs = getDistTxs(dist.$id);
                                     const totalINR = distTxs.reduce((sum, t) => sum + (Number(t.actual_inr_distributed) || 0), 0);
                                     return (

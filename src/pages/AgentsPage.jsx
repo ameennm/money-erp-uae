@@ -46,13 +46,14 @@ export default function AgentsPage() {
     const [paymentModal, setPaymentModal] = useState(false);
     const [paymentAgent, setPaymentAgent] = useState(null);
     const [paymentAmount, setPaymentAmount] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
     const [user, setUser] = useState(null);
 
     const fetch = async () => {
         setLoading(true);
         try {
             const [ar, tr, ex] = await Promise.all([
-                dbService.listAgents([Query.equal('type', 'collection')]),
+                dbService.listAgents(), // Fetch all agents for universal search
                 dbService.listTransactions(),
                 dbService.listExpenses(),
             ]);
@@ -276,10 +277,25 @@ export default function AgentsPage() {
     return (
         <Layout title="Agents">
             <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-                <div>
-                    <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                        {agents.length} agent{agents.length !== 1 ? 's' : ''} registered
-                    </h3>
+                <div className="flex items-center gap-4 flex-1">
+                    <div>
+                        <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                            {agents.length} agent{agents.length !== 1 ? 's' : ''} registered
+                        </h3>
+                    </div>
+                    <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
+                        <input
+                            type="text"
+                            placeholder="Search agents by name or phone..."
+                            className="form-input"
+                            style={{ paddingLeft: '36px' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </span>
+                    </div>
                 </div>
                 <button id="new-agent-btn" className="btn btn-accent" onClick={openNew}>
                     <Plus size={16} /> Add Agent
@@ -325,8 +341,9 @@ export default function AgentsPage() {
                         <table className="data-table">
                             <thead>
                                 <tr>
-                                    <th>#</th>
+                                    <th style={{ width: 40 }}>#</th>
                                     <th>Name</th>
+                                    <th>Type</th>
                                     <th>Phone</th>
                                     <th>Location</th>
                                     <th>Currency</th>
@@ -337,7 +354,15 @@ export default function AgentsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {agents.map((a, i) => {
+                                {agents
+                                    .filter(a => {
+                                        if (searchTerm) {
+                                            return a.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                                   a.phone?.toLowerCase().includes(searchTerm.toLowerCase());
+                                        }
+                                        return a.type === 'collection';
+                                    })
+                                    .map((a, i) => {
                                     const cur = a.currency || 'SAR';
                                     const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
                                     const owed = round2(a[owedField] || 0);
@@ -347,33 +372,27 @@ export default function AgentsPage() {
                                     return (
                                         <tr key={a.$id}>
                                             <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                                            <td style={{ fontWeight: 600 }}>
-                                                <div className="flex items-center gap-2">
-                                                    <div style={{
-                                                        width: 32, height: 32, borderRadius: '50%',
-                                                        background: 'linear-gradient(135deg, var(--brand-primary), var(--brand-accent))',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                        fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
-                                                    }}>
-                                                        {a.name?.[0]?.toUpperCase()}
-                                                    </div>
-                                                    <button
-                                                        onClick={() => openHistory(a)}
-                                                        style={{
-                                                            background: 'none', border: 'none', padding: 0,
-                                                            fontWeight: 'inherit', cursor: 'pointer',
-                                                            textDecoration: 'underline', color: 'var(--brand-accent)'
-                                                        }}
-                                                    >
+                                            <td>
+                                                <div style={{ fontWeight: 600 }}>
+                                                    <button onClick={() => openHistory(a)} className="agent-link">
                                                         {a.name}
                                                     </button>
                                                 </div>
+                                                {a.notes && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.notes}</div>}
                                             </td>
                                             <td>
-                                                <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
-                                                    <Phone size={13} /> {a.phone || '—'}
-                                                </div>
+                                                <span className={`badge ${
+                                                    a.type === 'collection' ? 'badge-completed' : 
+                                                    a.type === 'distributor' ? 'badge-pending' : 
+                                                    'badge-inprogress'
+                                                }`} style={{ fontSize: '10px' }}>
+                                                    {a.type === 'collection' ? 'Collector' : 
+                                                     a.type === 'distributor' ? 'Distributor' : 
+                                                     a.type === 'conversion_sar' ? 'SAR Conv' : 
+                                                     a.type === 'conversion_aed' ? 'AED Conv' : a.type}
+                                                </span>
                                             </td>
+                                            <td style={{ color: 'var(--text-secondary)' }}>{a.phone || '—'}</td>
                                             <td>
                                                 <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
                                                     <MapPin size={13} /> {a.location || '—'}
@@ -420,7 +439,7 @@ export default function AgentsPage() {
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                    <td colSpan={6} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
                                     <td style={{ textAlign: 'right', fontWeight: 800 }}>
                                         <div style={{ color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
                                         {totalCollectedAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}

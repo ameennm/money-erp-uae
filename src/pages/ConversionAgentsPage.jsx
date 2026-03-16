@@ -67,6 +67,7 @@ export default function ConversionAgentsPage() {
     const [activeAgent, setActiveAgent] = useState(null);
     const [actionAmount, setActionAmount] = useState('');
     const [actionRate, setActionRate] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
     const [user, setUser] = useState(null);
 
     // Record Edit Modal State
@@ -636,8 +637,23 @@ export default function ConversionAgentsPage() {
             </div>
 
             <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-                <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-                    {agents.length} agent{agents.length !== 1 ? 's' : ''} · {convRecs.length} total conversions recorded
+                <div className="flex items-center gap-4 flex-1">
+                    <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                        {agents.length} agent{agents.length !== 1 ? 's' : ''} · {convRecs.length} total conversions recorded
+                    </div>
+                    <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
+                        <input
+                            type="text"
+                            placeholder="Search conversion agents..."
+                            className="form-input"
+                            style={{ paddingLeft: '36px' }}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </span>
+                    </div>
                 </div>
                 <button id="new-conv-agent-btn" className="btn btn-accent" onClick={openNew}>
                     <Plus size={16} /> Add Conversion Agent
@@ -705,7 +721,13 @@ export default function ConversionAgentsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {agents.filter(a => a.type === activeTab).map((a, i) => {
+                                {agents
+                                    .filter(a => a.type === activeTab)
+                                    .filter(a => 
+                                        a.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                        a.phone?.toLowerCase().includes(searchTerm.toLowerCase())
+                                    )
+                                    .map((a, i) => {
                                     const s = agentStats(a);
                                     const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
                                     const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
