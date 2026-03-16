@@ -342,15 +342,15 @@ export default function AgentsPage() {
                             <thead>
                                 <tr>
                                     <th style={{ width: 40 }}>#</th>
-                                    <th>Name</th>
-                                    <th>Type</th>
-                                    <th>Phone</th>
-                                    <th>Location</th>
-                                    <th>Currency</th>
+                                    <th>Agent Name</th>
+                                    <th className="hide-sm">Type</th>
+                                    <th className="hide-md">Phone</th>
+                                    <th className="hide-lg">Location</th>
+                                    <th className="hide-sm">Currency</th>
                                     <th style={{ textAlign: 'right' }}>Total</th>
                                     <th style={{ textAlign: 'right' }}>Paid</th>
                                     <th style={{ textAlign: 'right' }}>Balance</th>
-                                    <th>Actions</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -378,9 +378,9 @@ export default function AgentsPage() {
                                                         {a.name}
                                                     </button>
                                                 </div>
-                                                {a.notes && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.notes}</div>}
+                                                {a.notes && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }} className="hide-md">{a.notes}</div>}
                                             </td>
-                                            <td>
+                                            <td className="hide-sm">
                                                 <span className={`badge ${
                                                     a.type === 'collection' ? 'badge-completed' : 
                                                     a.type === 'distributor' ? 'badge-pending' : 
@@ -392,13 +392,13 @@ export default function AgentsPage() {
                                                      a.type === 'conversion_aed' ? 'AED Conv' : a.type}
                                                 </span>
                                             </td>
-                                            <td style={{ color: 'var(--text-secondary)' }}>{a.phone || '—'}</td>
-                                            <td>
+                                            <td style={{ color: 'var(--text-secondary)' }} className="hide-md">{a.phone || '—'}</td>
+                                            <td className="hide-lg">
                                                 <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
                                                     <MapPin size={13} /> {a.location || '—'}
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td className="hide-sm">
                                                 <span className={`badge ${a.currency === 'AED' ? 'badge-admin' : 'badge-collector'}`}>
                                                     {a.currency || 'SAR'}
                                                 </span>
@@ -412,8 +412,8 @@ export default function AgentsPage() {
                                             <td style={{ textAlign: 'right', fontWeight: 700, color: owed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
                                                 {owed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
                                             </td>
-                                            <td>
-                                                <div className="flex gap-2">
+                                            <td style={{ textAlign: 'right' }}>
+                                                <div className="flex gap-2 justify-end">
                                                     {/* Receive Payment — only show if agent owes us something */}
                                                     {owed > 0 && (
                                                         <button
@@ -439,7 +439,10 @@ export default function AgentsPage() {
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={6} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                    <td colSpan={3} className="hide-sm"></td>
+                                    <td className="hide-md"></td>
+                                    <td className="hide-lg"></td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
                                     <td style={{ textAlign: 'right', fontWeight: 800 }}>
                                         <div style={{ color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
                                         {totalCollectedAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}

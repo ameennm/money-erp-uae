@@ -710,13 +710,13 @@ export default function ConversionAgentsPage() {
                             <thead>
                                 <tr>
                                     <th style={{ width: 40 }}>#</th>
-                                    <th>Name</th>
-                                    <th>Phone</th>
-                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total SAR Sent' : 'Total AED Sent'}</th>
-                                    <th style={{ textAlign: 'right' }}>{activeTab === 'conversion_sar' ? 'Total AED' : 'Total INR'}</th>
-                                    <th style={{ textAlign: 'right' }}>Net Profit (INR)</th>
-                                    <th style={{ textAlign: 'right' }}>Balance Owed To Us</th>
-                                    <th style={{ textAlign: 'center' }}>Ledger Operations</th>
+                                    <th>Agent Name</th>
+                                    <th className="hide-md">Phone</th>
+                                    <th style={{ textAlign: 'right' }} className="hide-sm">{activeTab === 'conversion_sar' ? 'Total SAR Sent' : 'Total AED Sent'}</th>
+                                    <th style={{ textAlign: 'right' }} className="hide-sm">{activeTab === 'conversion_sar' ? 'Total AED' : 'Total INR'}</th>
+                                    <th style={{ textAlign: 'right' }} className="hide-lg">Profit (INR)</th>
+                                    <th style={{ textAlign: 'right' }}>Balance</th>
+                                    <th style={{ textAlign: 'center' }} className="hide-sm">Operations</th>
                                     <th style={{ textAlign: 'right' }}>Actions</th>
                                 </tr>
                             </thead>

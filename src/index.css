@@ -530,52 +530,91 @@ textarea {
 /* ─── Table ─────────────────────────────────────────────────────────────────── */
 .table-wrapper {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px); /* Moves scrollbar up and keeps header visible */
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   -webkit-overflow-scrolling: touch;
   width: 100%;
+  position: relative;
+  background: var(--bg-surface);
+}
+
+/* Custom scrollbar for tables to make it look premium */
+.table-wrapper::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-accent);
 }
 
 .data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate; /* Required for sticky header border */
+  border-spacing: 0;
   font-size: 14px;
 }
 
 .data-table thead {
-  background: var(--bg-surface);
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .data-table th {
-  padding: 14px 16px;
+  padding: 12px 16px;
   text-align: left;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
+  background: var(--bg-surface); /* Opaque background for sticky */
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
 .data-table td {
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
   vertical-align: middle;
   white-space: nowrap;
+  background: var(--bg-card);
 }
 
-.data-table tr:last-child td {
-  border-bottom: none;
-}
-
-.data-table tbody tr {
-  transition: background var(--transition);
-}
-
-.data-table tbody tr:hover {
+.data-table tbody tr:hover td {
   background: var(--bg-card-hover);
+}
+
+/* Responsive Column Utilities */
+@media (max-width: 1200px) {
+  .hide-lg { display: none !important; }
+}
+
+@media (max-width: 992px) {
+  .hide-md { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  .hide-sm { display: none !important; }
+  .table-wrapper { max-height: none; } /* On small screens, native page scroll is often better */
+  .data-table { font-size: 13px; }
+  .data-table th, .data-table td { padding: 10px 12px; }
+}
+
+/* Helper to allow wrapping in specific cells if needed */
+.text-wrap {
+  white-space: normal !important;
+  min-width: 150px;
+  max-width: 300px;
 }
 
 /* ─── Status Badges ──────────────────────────────────────────────────────────── */

@@ -301,14 +301,14 @@ export default function DistributorsPage() {
                         <table className="data-table">
                             <thead>
                                 <tr>
-                                    <th>#</th>
-                                    <th>Name</th>
-                                    <th>Phone</th>
-                                    <th>Total Distributions</th>
-                                    <th>Total INR Distributed</th>
-                                    <th>Available Balance (INR)</th>
-                                    <th>Notes</th>
-                                    <th>Actions</th>
+                                    <th style={{ width: 40 }}>#</th>
+                                    <th>Distributor Name</th>
+                                    <th className="hide-md">Phone</th>
+                                    <th className="hide-sm">Txs</th>
+                                    <th style={{ textAlign: 'right' }}>Total Distributed</th>
+                                    <th style={{ textAlign: 'right' }}>Available Balance</th>
+                                    <th className="hide-lg">Notes</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -326,34 +326,34 @@ export default function DistributorsPage() {
                                             <td style={{ fontWeight: 600 }}>
                                                 <div className="flex items-center gap-2">
                                                     <div style={{
-                                                        width: 32, height: 32, borderRadius: '50%',
-                                                        background: 'linear-gradient(135deg, #a78bfa, var(--brand-accent))',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                        fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
-                                                    }}>
-                                                        {dist.name?.[0]?.toUpperCase()}
-                                                    </div>
-                                                    <button
-                                                        onClick={() => setViewingDist(dist)}
-                                                        style={{
-                                                            background: 'none', border: 'none', padding: 0,
-                                                            fontWeight: 'inherit', cursor: 'pointer',
-                                                            textDecoration: 'underline', color: 'var(--brand-accent)'
-                                                        }}
-                                                    >
-                                                        {dist.name}
-                                                    </button>
-                                                </div>
-                                            </td>
-                                            <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{dist.phone || '—'}</td>
-                                            <td>{distTxs.length} txs</td>
-                                            <td style={{ fontWeight: 600, color: '#a78bfa' }}>₹{totalINR.toLocaleString('en-IN')}</td>
-                                            <td style={{ fontWeight: 700, color: dist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                                {dist.inr_balance < 0 ? '-' : ''}₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
-                                            </td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{dist.notes || '—'}</td>
-                                            <td>
-                                                <div className="flex gap-2">
+                                                         width: 32, height: 32, borderRadius: '50%',
+                                                         background: 'linear-gradient(135deg, #a78bfa, var(--brand-accent))',
+                                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                         fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
+                                                     }} className="hide-sm">
+                                                         {dist.name?.[0]?.toUpperCase()}
+                                                     </div>
+                                                     <button
+                                                         onClick={() => setViewingDist(dist)}
+                                                         style={{
+                                                             background: 'none', border: 'none', padding: 0,
+                                                             fontWeight: 'inherit', cursor: 'pointer',
+                                                             textDecoration: 'underline', color: 'var(--brand-accent)'
+                                                         }}
+                                                     >
+                                                         {dist.name}
+                                                     </button>
+                                                 </div>
+                                             </td>
+                                             <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{dist.phone || '—'}</td>
+                                             <td className="hide-sm">{distTxs.length} txs</td>
+                                             <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{totalINR.toLocaleString('en-IN')}</td>
+                                             <td style={{ fontWeight: 700, textAlign: 'right', color: dist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                                 {dist.inr_balance < 0 ? '-' : ''}₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
+                                             </td>
+                                             <td style={{ color: 'var(--text-muted)', fontSize: '13px' }} className="hide-lg">{dist.notes || '—'}</td>
+                                             <td style={{ textAlign: 'right' }}>
+                                                 <div className="flex gap-2 justify-end">
                                                     <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)}>
                                                         Deposit
                                                     </button>
@@ -379,7 +379,10 @@ export default function DistributorsPage() {
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: '#a78bfa' }}>GRAND TOTAL</td>
+                                    <td colSpan={2}></td>
+                                    <td className="hide-md"></td>
+                                    <td className="hide-sm"></td>
+                                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#a78bfa' }}>GRAND TOTAL</td>
                                     <td style={{ fontWeight: 800 }}>
                                         {distributors.reduce((sum, d) => sum + getDistTxs(d.$id).length, 0)} txs
                                     </td>
