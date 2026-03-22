@@ -12,11 +12,11 @@ const EXPENSE_CATEGORIES = [
 ];
 const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Agent Payment', 'Other Income'];
 
-const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', distributor_id: '', distributor_name: '' };
+const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', agent_id: '' };
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
-    const [distributors, setDistributors] = useState([]);
+    const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY);
@@ -26,12 +26,12 @@ export default function ExpensesPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const [r, dr] = await Promise.all([
+            const [r, ar] = await Promise.all([
                 dbService.listExpenses(),
-                dbService.listAgents([Query.equal('type', 'distributor')]),
+                dbService.listAgents(),
             ]);
             setExpenses(r.documents);
-            setDistributors(dr.documents);
+            setAgents(ar.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -58,14 +58,17 @@ export default function ExpensesPage() {
                 ...form,
                 amount: parseFloat(form.amount) || 0,
             };
-            // If category is Commission and a distributor is selected, set name
-            if (form.category === 'Commission' && form.distributor_id) {
-                const dist = distributors.find(d => d.$id === form.distributor_id);
-                payload.distributor_name = dist ? dist.name : '';
+            // If an agent is selected, set id and name
+            if (form.agent_id) {
+                const agent = agents.find(a => a.$id === form.agent_id);
+                payload.distributor_id = form.agent_id;
+                payload.distributor_name = agent ? agent.name : '';
             } else {
                 payload.distributor_id = '';
                 payload.distributor_name = '';
             }
+            // Remove agent_id from payload since we map it to distributor_id for db backwards compatibility
+            delete payload.agent_id;
             const created = await dbService.createExpense(payload);
             toast.success('Record saved');
             setModal(false);
@@ -99,7 +102,7 @@ export default function ExpensesPage() {
             'Category': e.category,
             'Amount': Number(e.amount || 0),
             'Currency': e.currency,
-            'Distributor': e.distributor_name || '',
+            'Related Agent': e.distributor_name || '',
             'Date': e.date || (e.$createdAt ? format(new Date(e.$createdAt), 'dd MMM yyyy') : ''),
             'Notes': e.notes || '',
         }));
@@ -196,7 +199,7 @@ export default function ExpensesPage() {
                                     <th>#</th>
                                     <th>Title</th>
                                     <th>Category</th>
-                                    <th>Distributor</th>
+                                    <th>Related Agent</th>
                                     <th>Amount</th>
                                     <th>Currency</th>
                                     <th>Date</th>
@@ -269,7 +272,7 @@ export default function ExpensesPage() {
                                     <div className="form-group">
                                         <label className="form-label">Category</label>
                                         <select id="exp-category" className="form-select"
-                                            value={form.category} onChange={e => setForm({ ...form, category: e.target.value, distributor_id: '', distributor_name: '' })}>
+                                            value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
                                             {(form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => <option key={c}>{c}</option>)}
                                         </select>
                                     </div>
@@ -284,27 +287,37 @@ export default function ExpensesPage() {
                                     </div>
                                 </div>
 
-                                {/* Distributor dropdown — only for Commission category */}
-                                {form.category === 'Commission' && form.type === 'expense' && (
-                                    <div className="form-group">
-                                        <label className="form-label">Distributor (Commission for)</label>
-                                        <select
-                                            className="form-select"
-                                            value={form.distributor_id}
-                                            onChange={e => setForm({ ...form, distributor_id: e.target.value })}
-                                        >
-                                            <option value="">— Select Distributor —</option>
-                                            {distributors.map(d => (
+                                {/* Agent dropdown (maps to distributor in DB) */}
+                                <div className="form-group">
+                                    <label className="form-label">Assign to Agent/Distributor (Optional)</label>
+                                    <select
+                                        className="form-select"
+                                        value={form.agent_id}
+                                        onChange={e => setForm({ ...form, agent_id: e.target.value })}
+                                    >
+                                        <option value="">— Select Agent / Distributor —</option>
+                                        <optgroup label="Distributors">
+                                            {agents.filter(d => d.type === 'distributor').map(d => (
                                                 <option key={d.$id} value={d.$id}>{d.name}</option>
                                             ))}
-                                        </select>
-                                        {form.distributor_id && (
-                                            <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 4 }}>
-                                                ✓ This commission will appear in {distributors.find(d => d.$id === form.distributor_id)?.name}'s ledger
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                                        </optgroup>
+                                        <optgroup label="Conversion Agents">
+                                            {agents.filter(a => a.type.startsWith('conversion')).map(d => (
+                                                <option key={d.$id} value={d.$id}>{d.name}</option>
+                                            ))}
+                                        </optgroup>
+                                        <optgroup label="Collection Agents">
+                                            {agents.filter(a => a.type.startsWith('collection')).map(d => (
+                                                <option key={d.$id} value={d.$id}>{d.name}</option>
+                                            ))}
+                                        </optgroup>
+                                    </select>
+                                    {form.category === 'Commission' && form.type === 'expense' && form.agent_id && agents.find(a => a.$id === form.agent_id)?.type === 'distributor' && (
+                                        <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 4 }}>
+                                            ✓ This commission will appear in {agents.find(d => d.$id === form.agent_id)?.name}'s ledger
+                                        </div>
+                                    )}
+                                </div>
 
                                 <div className="form-row">
                                     <div className="form-group">

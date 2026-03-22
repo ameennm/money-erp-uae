@@ -49,6 +49,11 @@ export default function DistributorsPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
 
+    // Record Edit Modal State
+    const [editRecordModal, setEditRecordModal] = useState(false);
+    const [editingRecord, setEditingRecord] = useState(null);
+    const [editRecordForm, setEditRecordForm] = useState({ amount: '', notes: '' });
+
     const fetchAll = async () => {
         setLoading(true);
         try {
@@ -206,6 +211,54 @@ export default function DistributorsPage() {
             ]);
         } catch (err) {
             toast.error('Transfer failed: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleEditRecord = (ev) => {
+        setEditingRecord(ev);
+        setEditRecordForm({
+            amount: Math.abs(ev.amount),
+            notes: ev.notes || ev.details || ''
+        });
+        setEditRecordModal(true);
+    };
+
+    const handleUpdateRecord = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const r = editingRecord;
+            const newAmt = round2(parseFloat(editRecordForm.amount) || 0);
+            const newNotes = editRecordForm.notes;
+            
+            if (r.type === 'distribution') {
+                toast.error('To edit a distribution transaction, please go to the Transactions page.');
+                setSaving(false); return;
+            }
+
+            const oldAmtAbs = Math.abs(r.amount);
+            const diff = round2(newAmt - oldAmtAbs);
+            const originalId = r.$id.replace('_in', '').replace('_out', '').replace('_comm', '');
+            const isCredit = (r.type === 'deposit' || r.type === 'transfer_in');
+            const balanceChange = isCredit ? diff : -diff;
+
+            await dbService.updateExpense(originalId, { amount: newAmt, notes: newNotes });
+            
+            if (balanceChange !== 0 && viewingDist) {
+                const newBal = round2((Number(viewingDist.inr_balance) || 0) + balanceChange);
+                await dbService.updateAgent(viewingDist.$id, { inr_balance: newBal });
+                setDistributors(prev => prev.map(d => d.$id === viewingDist.$id ? { ...d, inr_balance: newBal } : d));
+                setViewingDist(prev => ({ ...prev, inr_balance: newBal }));
+            }
+
+            setExpenseRecs(prev => prev.map(ex => ex.$id === originalId ? { ...ex, amount: newAmt, notes: newNotes } : ex));
+            
+            toast.success('Record updated');
+            setEditRecordModal(false);
+        } catch (err) {
+            toast.error(err.message);
         } finally {
             setSaving(false);
         }
@@ -442,6 +495,7 @@ export default function DistributorsPage() {
                             amount: sign * Number(e.amount),
                             ref: isTransferOut ? '↑OUT' : isTransferIn ? '↓IN' : 'DEP',
                             details: title || 'Admin Deposit',
+                            notes: e.notes || '',
                             status: 'completed'
                         };
                     });
@@ -456,6 +510,7 @@ export default function DistributorsPage() {
                     amount: -Number(e.amount),  // debit from distributor balance
                     ref: 'COM',
                     details: `Commission (${e.currency} ${Number(e.amount).toLocaleString()})`,
+                    notes: e.notes || '',
                     status: 'completed'
                 }));
 
@@ -599,9 +654,10 @@ export default function DistributorsPage() {
                                                             {ev.running_balance < 0 ? '-' : ''}₹{Math.abs(Number(ev.running_balance)).toLocaleString('en-IN')}
                                                         </td>
                                                         <td style={{ textAlign: 'right' }}>
-                                                            <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
+                                                            <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={(e) => {
+                                                                e.stopPropagation();
                                                                 if (ev.type === 'distribution') window.open(`/transactions?q=${ev.ref.replace('#', '')}`, '_blank');
-                                                                else window.open(`/expenses`, '_blank');
+                                                                else handleEditRecord(ev);
                                                             }}>
                                                                 <Pencil size={12} />
                                                             </button>
@@ -792,6 +848,36 @@ export default function DistributorsPage() {
                                 >
                                     {saving ? 'Transferring…' : '↔ Confirm Transfer'}
                                 </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Record Edit Modal */}
+            {editRecordModal && editingRecord && (
+                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditRecordModal(false)}>
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3 className="modal-title">Edit {editingRecord.type.replace(/_/g, ' ').toUpperCase()}</h3>
+                            <button className="close-btn" onClick={() => setEditRecordModal(false)}><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleUpdateRecord}>
+                            <div className="modal-body">
+                                <div className="form-group">
+                                    <label className="form-label">Amount (INR)</label>
+                                    <input className="form-input" type="number" step="0.01" required
+                                        value={editRecordForm.amount} onChange={e => setEditRecordForm({ ...editRecordForm, amount: e.target.value })} />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Notes / Details</label>
+                                    <textarea className="form-input" rows="3"
+                                        value={editRecordForm.notes} onChange={e => setEditRecordForm({ ...editRecordForm, notes: e.target.value })}></textarea>
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button type="button" className="btn btn-outline" onClick={() => setEditRecordModal(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-accent" disabled={saving}>Update Record</button>
                             </div>
                         </form>
                     </div>
