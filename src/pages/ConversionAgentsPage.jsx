@@ -297,6 +297,13 @@ export default function ConversionAgentsPage() {
         });
         setModal(true);
     };
+    const openDeposit = (a) => {
+        setActiveAgent(a);
+        setActionAmount('');
+        setActionRate('');
+        setDepositNote('');
+        setDepositModal(true);
+    };
 
     const handleSave = async (e) => {
         e.preventDefault();
