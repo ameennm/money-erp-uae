@@ -359,12 +359,12 @@ export default function DistributorsPage() {
                                 <tr>
                                     <th style={{ width: 40 }}>#</th>
                                     <th>Distributor Name</th>
-                                    <th className="hide-md">Phone</th>
-                                    <th className="hide-sm">Txs</th>
-                                    <th style={{ textAlign: 'right' }}>Total Distributed</th>
-                                    <th style={{ textAlign: 'right' }}>Available Balance</th>
+                                    <th className="hide-md" style={{ width: 140 }}>Phone</th>
+                                    <th className="hide-sm" style={{ width: 80 }}>Txs</th>
+                                    <th style={{ textAlign: 'right', width: 160 }}>Total Distributed</th>
+                                    <th style={{ textAlign: 'right', width: 160 }}>Available Balance</th>
                                     <th className="hide-lg">Notes</th>
-                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                    <th style={{ textAlign: 'right', width: 180 }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>

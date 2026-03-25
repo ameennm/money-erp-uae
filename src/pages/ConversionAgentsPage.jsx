@@ -719,13 +719,13 @@ export default function ConversionAgentsPage() {
                                 <tr>
                                     <th style={{ width: 40 }}>#</th>
                                     <th>Agent Name</th>
-                                    <th className="hide-md">Phone</th>
-                                    <th style={{ textAlign: 'right' }} className="hide-sm">{activeTab === 'conversion_sar' ? 'Total SAR Sent' : 'Total AED Sent'}</th>
-                                    <th style={{ textAlign: 'right' }} className="hide-sm">{activeTab === 'conversion_sar' ? 'Total AED' : 'Total INR'}</th>
-                                    <th style={{ textAlign: 'right' }} className="hide-lg">Profit (INR)</th>
-                                    <th style={{ textAlign: 'right' }}>Balance</th>
-                                    <th style={{ textAlign: 'center' }} className="hide-sm">Operations</th>
-                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                    <th className="hide-md" style={{ width: 140 }}>Phone</th>
+                                    <th style={{ textAlign: 'right', width: 140 }} className="hide-sm">{activeTab === 'conversion_sar' ? 'SAR Sent' : 'AED Sent'}</th>
+                                    <th style={{ textAlign: 'right', width: 140 }} className="hide-sm">{activeTab === 'conversion_sar' ? 'AED Got' : 'INR Got'}</th>
+                                    <th style={{ textAlign: 'right', width: 120 }} className="hide-lg">Profit (INR)</th>
+                                    <th style={{ textAlign: 'right', width: 150 }}>Balance</th>
+                                    <th style={{ textAlign: 'center', width: 180 }} className="hide-sm">Operations</th>
+                                    <th style={{ textAlign: 'right', width: 120 }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>

@@ -635,15 +635,15 @@ export default function TransactionsPage() {
                     <table className="data-table">
                         <thead>
                             <tr>
-                                <th>TX ID</th>
+                                <th style={{ width: 100 }}>TX ID</th>
                                 <th>Client</th>
-                                <th>Requested</th>
-                                <th>Amount</th>
+                                <th style={{ textAlign: 'right', width: 140 }}>Requested</th>
+                                <th style={{ textAlign: 'right', width: 160 }}>Amount</th>
                                 <th>Agent</th>
-                                {isAdmin && <th>Profit</th>}
+                                {isAdmin && <th style={{ textAlign: 'right', width: 120 }}>Profit</th>}
                                 {isAdmin && <th>Distributor</th>}
-                                <th>Status</th>
-                                <th>Actions</th>
+                                <th style={{ width: 120 }}>Status</th>
+                                <th style={{ width: 100 }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -659,14 +659,14 @@ export default function TransactionsPage() {
                                             )}
                                         </td>
                                         <td>{tx.client_name}</td>
-                                        <td className="currency inr">₹{tx.inr_requested?.toLocaleString()}</td>
-                                        <td className={`currency ${tx.collected_currency?.toLowerCase()}`}>
-                                            {tx.collected_amount?.toLocaleString()} {tx.collected_currency}
+                                        <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>₹{tx.inr_requested?.toLocaleString('en-IN')}</td>
+                                        <td className={`currency ${tx.collected_currency?.toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency}</span>
                                         </td>
                                         <td>{tx.collection_agent_name || '—'}</td>
                                         {isAdmin && (
-                                            <td style={{ color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
-                                                {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')} ${profitCur}` : '—'}
+                                            <td style={{ textAlign: 'right', color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
+                                                {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')}` : '—'}
                                             </td>
                                         )}
                                         {isAdmin && (

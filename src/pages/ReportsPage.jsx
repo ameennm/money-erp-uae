@@ -277,31 +277,31 @@ export default function ReportsPage() {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)', marginBottom: 12 }}>
                 Ledger Summary — {dateRange}
             </div>
-            <div className="stats-grid" style={{ marginBottom: 28 }}>
+            <div className="stats-grid" style={{ marginBottom: 32 }}>
                 {displayCurrencies.map(cur => {
                     const t = totals[cur];
                     const colors = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' };
                     const col = colors[cur];
                     return (
-                        <div key={cur} className="card" style={{ padding: 20, border: `1px solid ${col}25` }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                                <span style={{ fontSize: 15, fontWeight: 800, color: col }}>{cur}</span>
-                                <span style={{ fontSize: 'clamp(16px, 2.5vw, 22px)', fontWeight: 800, color: col }}>
+                        <div key={cur} className="card" style={{ padding: '24px 20px', border: `1px solid ${col}40`, position: 'relative', overflow: 'hidden' }}>
+                            <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: col }}></div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{cur} Native Balance</span>
+                                    <span style={{ fontSize: 13, fontWeight: 800, color: col }}>{cur}</span>
+                                </div>
+                                <div style={{ fontSize: 'clamp(24px, 2.8vw, 32px)', fontWeight: 900, color: col, letterSpacing: '-0.5px', margin: '4px 0' }}>
                                     {t.balance >= 0 ? '' : '-'}{fmt(Math.abs(t.balance))}
-                                </span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                                <div>
-                                    <span style={{ color: 'var(--text-muted)' }}>Credit: </span>
-                                    <span style={{ color: 'var(--brand-accent)', fontWeight: 700 }}>{fmt(t.credit)}</span>
                                 </div>
-                                <div>
-                                    <span style={{ color: 'var(--text-muted)' }}>Debit: </span>
-                                    <span style={{ color: 'var(--status-failed)', fontWeight: 700 }}>{fmt(t.debit)}</span>
-                                </div>
-                                <div>
-                                    <span style={{ color: 'var(--text-muted)' }}>Balance: </span>
-                                    <span style={{ fontWeight: 700, color: t.balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>{fmt(t.balance)}</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+                                    <div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>Total Credit</div>
+                                        <div style={{ color: 'var(--brand-accent)', fontWeight: 700, fontSize: 14 }}>{fmt(t.credit)}</div>
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>Total Debit</div>
+                                        <div style={{ color: 'var(--status-failed)', fontWeight: 700, fontSize: 14 }}>{fmt(t.debit)}</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -403,15 +403,15 @@ export default function ReportsPage() {
                         <table className="data-table" style={{ fontSize: 13 }}>
                             <thead>
                                 <tr>
-                                    <th style={{ width: 30 }}>#</th>
-                                    <th>Date</th>
-                                    <th>Type</th>
+                                    <th style={{ width: 40 }}>#</th>
+                                    <th style={{ width: 100 }}>Date</th>
+                                    <th style={{ width: 80 }}>Type</th>
                                     <th>Particular</th>
-                                    <th>Currency</th>
-                                    <th style={{ textAlign: 'right', color: 'var(--brand-accent)' }}>Credit</th>
-                                    <th style={{ textAlign: 'right', color: 'var(--status-failed)' }}>Debit</th>
-                                    <th style={{ textAlign: 'right' }}>Balance</th>
-                                    <th>Notes</th>
+                                    <th style={{ width: 90 }}>Currency</th>
+                                    <th style={{ textAlign: 'right', color: 'var(--brand-accent)', width: 140 }}>Credit</th>
+                                    <th style={{ textAlign: 'right', color: 'var(--status-failed)', width: 140 }}>Debit</th>
+                                    <th style={{ textAlign: 'right', width: 160 }}>Balance</th>
+                                    <th style={{ width: 200 }}>Notes</th>
                                 </tr>
                             </thead>
                             <tbody>
