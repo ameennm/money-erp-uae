@@ -188,9 +188,9 @@ export default function TransactionsPage() {
                     if (dist && payload.status === 'completed') {
                         await ledgerService.recordEntry({
                             agent: dist,
-                            amount: -payload.inr_requested,
+                            amount: payload.inr_requested,
                             currency: 'INR',
-                            type: 'debit',
+                            type: 'credit', // Agent gave INR to client
                             reference_type: 'transaction',
                             reference_id: editTx.$id,
                             description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name} (Revised)`
@@ -203,7 +203,7 @@ export default function TransactionsPage() {
                             agent: colAgent,
                             amount: payload.collected_amount,
                             currency: payload.collected_currency,
-                            type: 'credit',
+                            type: 'debit', // Agent received SAR from client
                             reference_type: 'transaction',
                             reference_id: editTx.$id,
                             description: `TX #${payload.tx_id} - Collected from ${payload.client_name} (Revised)`
@@ -217,7 +217,7 @@ export default function TransactionsPage() {
                                 agent: convAgent,
                                 amount: payload.collected_amount,
                                 currency: payload.collected_currency,
-                                type: 'credit',
+                                type: 'debit', // Agent received SAR to convert
                                 reference_type: 'transaction',
                                 reference_id: editTx.$id,
                                 description: `TX #${payload.tx_id} - Conversion for ${payload.client_name} (Revised)`
@@ -260,15 +260,15 @@ export default function TransactionsPage() {
                 payload.actual_inr_distributed = round2(payload.inr_requested);
 
                 const created = await dbService.createTransaction(payload);
-                
+
                 // ── Update distributor balance and ledger ──
                 const dist = agents.find(a => a.$id === payload.distributor_id);
                 if (dist) {
                     await ledgerService.recordEntry({
                         agent: dist,
-                        amount: -payload.inr_requested,
+                        amount: payload.inr_requested,
                         currency: 'INR',
-                        type: 'debit',
+                        type: 'credit', // Agent gave INR to client
                         reference_type: 'transaction',
                         reference_id: created.$id,
                         description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
@@ -283,7 +283,7 @@ export default function TransactionsPage() {
                             agent: agent,
                             amount: payload.collected_amount,
                             currency: payload.collected_currency,
-                            type: 'credit',
+                            type: 'debit', // Agent received SAR from client
                             reference_type: 'transaction',
                             reference_id: created.$id,
                             description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
@@ -299,7 +299,7 @@ export default function TransactionsPage() {
                             agent: convAgent,
                             amount: payload.collected_amount,
                             currency: payload.collected_currency,
-                            type: 'credit',
+                            type: 'debit', // Agent received SAR to convert
                             reference_type: 'transaction',
                             reference_id: created.$id,
                             description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
@@ -352,7 +352,7 @@ export default function TransactionsPage() {
                     agent: convAgent,
                     amount: activeTx.collected_amount,
                     currency: activeTx.collected_currency,
-                    type: 'credit',
+                    type: 'debit', // Agent received SAR to convert
                     reference_type: 'transaction',
                     reference_id: activeTx.$id,
                     description: `TX #${activeTx.tx_id} - Received for conversion from ${activeTx.client_name}`
@@ -383,13 +383,13 @@ export default function TransactionsPage() {
 
             const diff = round2(inrDist - (activeTx.inr_requested || 0));
             const dist = agents.find(a => a.$id === (form.distributor_id || activeTx.distributor_id));
-            
+
             if (dist && diff !== 0) {
                 await ledgerService.recordEntry({
                     agent: dist,
-                    amount: -diff,
+                    amount: Math.abs(diff),
                     currency: 'INR',
-                    type: 'debit',
+                    type: diff > 0 ? 'credit' : 'debit', // If actual > requested, agent gave more (Credit)
                     reference_type: 'transaction',
                     reference_id: activeTx.$id,
                     description: `TX #${activeTx.tx_id} - INR Adjustment (Orig: ${activeTx.inr_requested}, Actual: ${inrDist})`

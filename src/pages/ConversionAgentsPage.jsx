@@ -159,7 +159,7 @@ export default function ConversionAgentsPage() {
                 agent: activeAgent,
                 amount: amtIn,
                 currency: balCur,
-                type: 'credit',
+                type: 'debit', // Agent received money from us
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Deposit to conversion agent: ${activeAgent.name}`
@@ -212,9 +212,9 @@ export default function ConversionAgentsPage() {
             // 2. Record Ledger entry (updates agent balance)
             await ledgerService.recordEntry({
                 agent: activeAgent,
-                amount: -amtSource, // Negative because we are receiving funds back from them (settling their "deposit")
+                amount: amtSource,
                 currency: balCur,
-                type: 'debit',
+                type: 'credit', // Agent gave us money back
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Receipt from conversion agent: ${activeAgent.name}`
@@ -348,7 +348,7 @@ export default function ConversionAgentsPage() {
                                                 {a.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.notes}</div>}
                                             </td>
                                             <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: bal >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
                                                 {(bal || 0).toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
                                             </td>
                                             <td style={{ textAlign: 'center' }}>

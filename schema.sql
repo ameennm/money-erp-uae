@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   id TEXT PRIMARY KEY,
   agent_id TEXT,
   agent_name TEXT,
+  agent_type TEXT, -- 'collection', 'distributor', 'conversion_sar', 'conversion_aed'
   amount REAL,
   currency TEXT,
   type TEXT, -- 'debit' or 'credit'

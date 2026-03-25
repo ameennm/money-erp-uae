@@ -97,7 +97,7 @@ export default function DistributorsPage() {
                 agent: editItem,
                 amount: amt,
                 currency: 'INR',
-                type: 'credit',
+                type: 'debit', // Distributor received money from us
                 reference_type: 'expense',
                 reference_id: expense.$id,
                 description: depositNote || `Deposit of ₹${(amt || 0).toLocaleString('en-IN')}`
@@ -179,9 +179,9 @@ export default function DistributorsPage() {
             await Promise.all([
                 ledgerService.recordEntry({
                     agent: transferFrom,
-                    amount: -amt,
+                    amount: amt,
                     currency: 'INR',
-                    type: 'debit',
+                    type: 'credit', // Giver: Balance decreases
                     reference_type: 'expense',
                     reference_id: expOut.$id,
                     description: `Transfer to ${toDist.name}`
@@ -190,7 +190,7 @@ export default function DistributorsPage() {
                     agent: toDist,
                     amount: amt,
                     currency: 'INR',
-                    type: 'credit',
+                    type: 'debit', // Receiver: Balance increases
                     reference_type: 'expense',
                     reference_id: expIn.$id,
                     description: `Transfer from ${transferFrom.name}`
@@ -312,8 +312,8 @@ export default function DistributorsPage() {
                                              <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{dist.phone || '—'}</td>
                                              <td className="hide-sm">{distTxs.length} txs</td>
                                              <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{(totalINR || 0).toLocaleString('en-IN')}</td>
-                                             <td style={{ fontWeight: 700, textAlign: 'right', color: dist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                                 {dist.inr_balance < 0 ? '-' : ''}₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
+                                             <td style={{ fontWeight: 700, textAlign: 'right', color: 'var(--text-primary)' }}>
+                                                 ₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
                                              </td>
                                              <td style={{ color: 'var(--text-muted)', fontSize: '13px' }} className="hide-lg">{dist.notes || '—'}</td>
                                              <td style={{ textAlign: 'right' }}>

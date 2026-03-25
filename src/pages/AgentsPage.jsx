@@ -131,9 +131,9 @@ export default function AgentsPage() {
             // 2. Record Ledger entry (automatically updates agent balance)
             await ledgerService.recordEntry({
                 agent: paymentAgent,
-                amount: -amt, // Negative because agent is paying us back (reducing their debt)
+                amount: amt, // Positive amount, ledgerService will subtract for type 'credit'
                 currency: cur,
-                type: 'debit',
+                type: 'credit', // Agent paid us back (decreases debt)
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Payment received from ${paymentAgent.name}`
@@ -294,9 +294,9 @@ export default function AgentsPage() {
                                             <td style={{ textAlign: 'right', fontWeight: 700, color: paidToUs > 0 ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
                                                 {paidToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
                                             </td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: owed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
-                                                {owed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
-                                            </td>
+                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                                 {owed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                             </td>
                                             <td style={{ textAlign: 'right' }}>
                                                 <div className="flex gap-2 justify-end">
                                                     {/* Receive Payment — only show if agent owes us something */}

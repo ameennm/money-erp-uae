@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { dbService } from '../lib/appwrite';
+import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import {
     ArrowLeftRight, Users, UserCog,
@@ -121,6 +122,20 @@ export default function DashboardPage() {
                 date: new Date().toISOString().split('T')[0]
             });
 
+            // Record in ledger
+            const ag = agents.find(a => a.$id === convertForm.conversion_agent_id);
+            if (ag) {
+                await ledgerService.recordEntry({
+                    agent: ag,
+                    amount: targetAmount,
+                    currency: 'SAR',
+                    type: 'debit', // Agent received bulk SAR to convert
+                    reference_type: 'aed_conversion',
+                    reference_id: created.$id,
+                    description: `Bulk SAR->AED Conversion: ${targetAmount} SAR`
+                });
+            }
+
             toast.success(`Converted ${targetAmount} SAR → ${aedAmount.toFixed(2)} AED`);
             setConvertModal(false);
             setConvertForm({ sar_to_convert: '', sar_to_aed_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
@@ -146,7 +161,7 @@ export default function DashboardPage() {
             const inrAmount = aedAmt * rate;
 
             // Create AED expense (money leaving AED pool)
-            await dbService.createExpense({
+            const expAed = await dbService.createExpense({
                 title: `AED→INR Conversion via ${inrForm.conversion_agent_name}`,
                 type: 'expense',
                 category: 'AED→INR Conversion',
@@ -159,7 +174,7 @@ export default function DashboardPage() {
             });
 
             // Create INR income (money entering INR undistributed pool)
-            await dbService.createExpense({
+            const expInr = await dbService.createExpense({
                 title: 'AED→INR Conversion',
                 type: 'income',
                 category: 'AED→INR Conversion',
@@ -170,6 +185,35 @@ export default function DashboardPage() {
                 distributor_id: inrForm.conversion_agent_id,
                 distributor_name: inrForm.conversion_agent_name
             });
+
+            // Record in ledger for AED->INR agent
+            const ag = agents.find(a => a.$id === inrForm.conversion_agent_id);
+            if (ag) {
+                // 1. They receive AED (increases their "debt" to us)
+                await ledgerService.recordEntry({
+                    agent: ag,
+                    amount: aedAmt,
+                    currency: 'AED',
+                    type: 'debit',
+                    reference_type: 'expense',
+                    reference_id: expAed.$id,
+                    description: `Received bulk AED for conversion to INR`
+                });
+                // 2. They give us INR (decreases their "debt")
+                // Note: Their balance is tracked in the currency they operate in (AED). 
+                // If they give INR, it usually offsets the AED they took.
+                // However, our system tracks separate balances.
+                // If it's an AED->INR agent, they usually have an AED balance.
+                await ledgerService.recordEntry({
+                    agent: ag,
+                    amount: inrAmount,
+                    currency: 'INR',
+                    type: 'credit',
+                    reference_type: 'expense',
+                    reference_id: expInr.$id,
+                    description: `Provided bulk INR after conversion`
+                });
+            }
 
             toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')} via ${inrForm.conversion_agent_name}`);
             setInrConvertModal(false);

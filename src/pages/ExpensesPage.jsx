@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { dbService, Query } from '../lib/appwrite';
+import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import { Plus, X, Trash2, TrendingDown, TrendingUp, Download } from 'lucide-react';
@@ -54,13 +55,32 @@ export default function ExpensesPage() {
         ev.preventDefault();
         setSaving(true);
         try {
+            const amt = parseFloat(form.amount) || 0;
             const payload = {
                 ...form,
-                amount: parseFloat(form.amount) || 0,
+                amount: amt,
             };
             const selectedAgent = agents.find(a => a.$id === form.distributor_id);
             payload.distributor_name = selectedAgent ? selectedAgent.name : '';
+            
             const created = await dbService.createExpense(payload);
+
+            const isDeposit = form.category?.includes('Deposit') || form.category === 'Capital Injection';
+            const ledgerType = isDeposit ? 'debit' : 'credit';
+
+            // Record in Ledger if agent is linked
+            if (selectedAgent) {
+                await ledgerService.recordEntry({
+                    agent: selectedAgent,
+                    amount: amt,
+                    currency: form.currency || 'SAR',
+                    type: ledgerType,
+                    reference_type: 'expense',
+                    reference_id: created.$id,
+                    description: `${form.type === 'income' ? 'Income' : 'Expense'}: ${form.title} (${form.category})`
+                });
+            }
+
             toast.success('Record saved');
             setModal(false);
             setForm(EMPTY);
