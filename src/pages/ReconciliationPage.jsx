@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { dbService, authService } from '../lib/appwrite';
-import { ledgerService } from '../services/ledgerService';
+import { ledgerService } from '../lib/ledgerService';
 import { RefreshCw, CheckCircle, AlertTriangle, Play, Database, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
