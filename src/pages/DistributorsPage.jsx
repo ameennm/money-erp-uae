@@ -765,6 +765,11 @@ export default function DistributorsPage() {
                                         </div>
                                     )}
                                 </div>
+                                <div className="form-group" style={{ marginTop: 16 }}>
+                                    <label className="form-label">Notes</label>
+                                    <textarea className="form-textarea" placeholder="Additional details..."
+                                        value={depositNote} onChange={e => setDepositNote(e.target.value)} />
+                                </div>
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setDepositModal(false)}>Cancel</button>
