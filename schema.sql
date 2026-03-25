@@ -98,3 +98,17 @@ CREATE TABLE IF NOT EXISTS settings (
   min_aed_rate REAL
 );
 
+CREATE TABLE IF NOT EXISTS ledger_entries (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT,
+  agent_name TEXT,
+  amount REAL,
+  currency TEXT,
+  type TEXT, -- 'debit' or 'credit'
+  reference_type TEXT, -- 'transaction', 'expense', 'aed_conversion', 'deposit', 'payment', 'transfer'
+  reference_id TEXT,
+  description TEXT,
+  running_balance REAL,
+  createdAt TEXT,
+  updatedAt TEXT
+);

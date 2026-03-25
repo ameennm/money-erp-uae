@@ -13,6 +13,7 @@ import CreditsPage from './pages/CreditsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import ActivityLogsPage from './pages/ActivityLogsPage';
+import ReconciliationPage from './pages/ReconciliationPage';
 
 export default function App() {
   return (
@@ -72,6 +73,9 @@ export default function App() {
           {/* Admin only — Settings */}
           <Route path="/settings" element={
             <ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>
+          } />
+          <Route path="/reconciliation" element={
+            <ProtectedRoute roles={['admin']}><ReconciliationPage /></ProtectedRoute>
           } />
 
           {/* Fallback */}

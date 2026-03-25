@@ -145,4 +145,13 @@ export const dbService = {
     async upsertSettings(data) {
         return fetchApi('/settings', { method: 'PUT', body: JSON.stringify(data) });
     },
+
+    // Ledger Entries
+    async listLedgerEntries(q = []) {
+        const data = await fetchApi('/ledger_entries');
+        return applyQueries(data, q);
+    },
+    async createLedgerEntry(data) { return fetchApi('/ledger_entries', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateLedgerEntry(id, data) { return fetchApi(`/ledger_entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async deleteLedgerEntry(id) { return fetchApi(`/ledger_entries/${id}`, { method: 'DELETE' }); },
 };

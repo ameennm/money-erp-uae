@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { dbService } from '../lib/appwrite';
+import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -179,99 +180,58 @@ export default function TransactionsPage() {
                 } else {
                     payload.edit_pending_approval = false;
 
-                    // ── Update Distributor Balances ──
-                    const oldDistId = editTx.distributor_id;
-                    const newDistId = payload.distributor_id;
-                    const oldInr = Number(editTx.inr_requested) || 0;
-                    const newInr = Number(payload.inr_requested) || 0;
+                    // ── Reverse all ledger entries for this transaction ──
+                    await ledgerService.reverseEntry(editTx.$id, 'transaction', 'EDIT REVERSAL: ');
 
-                    if (oldDistId === newDistId && newDistId) {
-                        const deltaInr = newInr - oldInr;
-                        const dist = agents.find(a => a.$id === newDistId);
-                        if (dist && deltaInr !== 0) {
-                            await dbService.updateAgent(dist.$id, { inr_balance: round2((dist.inr_balance || 0) - deltaInr) });
-                        }
-                    } else {
-                        if (oldDistId && editTx.status === 'completed') {
-                            const oldDist = agents.find(a => a.$id === oldDistId);
-                            if (oldDist) await dbService.updateAgent(oldDist.$id, { inr_balance: round2((oldDist.inr_balance || 0) + oldInr) });
-                        }
-                        if (newDistId && editTx.status === 'completed') {
-                            const newDist = agents.find(a => a.$id === newDistId);
-                            if (newDist) await dbService.updateAgent(newDist.$id, { inr_balance: round2((newDist.inr_balance || 0) - newInr) });
-                        }
+                    // ── Record new ledger entries based on NEW payload ──
+                    const dist = agents.find(a => a.$id === payload.distributor_id);
+                    if (dist && payload.status === 'completed') {
+                        await ledgerService.recordEntry({
+                            agent: dist,
+                            amount: -payload.inr_requested,
+                            currency: 'INR',
+                            type: 'debit',
+                            reference_type: 'transaction',
+                            reference_id: editTx.$id,
+                            description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name} (Revised)`
+                        });
                     }
 
-                    // ── Update Collection Agent Balances ──
-                    const oldAgentId = editTx.collection_agent_id;
-                    const newAgentId = payload.collection_agent_id;
-                    const oldColAmt = Number(editTx.collected_amount) || 0;
-                    const newColAmt = Number(payload.collected_amount) || 0;
-                    const oldCur = editTx.collected_currency || 'SAR';
-                    const newCur = payload.collected_currency || 'SAR';
-
-                    if (oldAgentId === newAgentId && newAgentId && oldCur === newCur) {
-                        const deltaCol = newColAmt - oldColAmt;
-                        const colAgent = agents.find(a => a.$id === newAgentId);
-                        if (colAgent && deltaCol !== 0) {
-                            const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
-                            await dbService.updateAgent(colAgent.$id, { [balField]: Math.max(0, round2((colAgent[balField] || 0) + deltaCol)) });
-                        }
-                    } else {
-                        if (oldAgentId) {
-                            const oldAgent = agents.find(a => a.$id === oldAgentId);
-                            if (oldAgent) {
-                                const balField = oldCur === 'AED' ? 'aed_balance' : 'sar_balance';
-                                await dbService.updateAgent(oldAgent.$id, { [balField]: Math.max(0, round2((oldAgent[balField] || 0) - oldColAmt)) });
-                            }
-                        }
-                        if (newAgentId) {
-                            const newAgent = agents.find(a => a.$id === newAgentId);
-                            if (newAgent) {
-                                const balField = newCur === 'AED' ? 'aed_balance' : 'sar_balance';
-                                await dbService.updateAgent(newAgent.$id, { [balField]: round2((newAgent[balField] || 0) + newColAmt) });
-                            }
-                        }
+                    const colAgent = agents.find(a => a.$id === payload.collection_agent_id);
+                    if (colAgent) {
+                        await ledgerService.recordEntry({
+                            agent: colAgent,
+                            amount: payload.collected_amount,
+                            currency: payload.collected_currency,
+                            type: 'credit',
+                            reference_type: 'transaction',
+                            reference_id: editTx.$id,
+                            description: `TX #${payload.tx_id} - Collected from ${payload.client_name} (Revised)`
+                        });
                     }
 
-                    // ── Update Conversion Agent Balances ──
-                    const oldConvId = editTx.conversion_agent_id;
-                    const newConvId = payload.conversion_agent_id;
-                    const oldConvAmt = Number(editTx.collected_amount) || 0;
-                    const newConvAmt = Number(payload.collected_amount) || 0;
-
-                    if (oldConvId === newConvId && newConvId) {
-                        const deltaConv = newConvAmt - oldConvAmt;
-                        const convAgent = agents.find(a => a.$id === newConvId);
-                        if (convAgent && deltaConv !== 0) {
-                            const balField = convAgent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                            await dbService.updateAgent(convAgent.$id, { [balField]: Math.max(0, round2((convAgent[balField] || 0) + deltaConv)) });
-                        }
-                    } else {
-                        if (oldConvId) {
-                            const oldConv = agents.find(a => a.$id === oldConvId);
-                            if (oldConv) {
-                                const balField = oldConv.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                                await dbService.updateAgent(oldConv.$id, { [balField]: Math.max(0, round2((oldConv[balField] || 0) - oldConvAmt)) });
-                            }
-                        }
-                        if (newConvId) {
-                            const newConv = agents.find(a => a.$id === newConvId);
-                            if (newConv) {
-                                const balField = newConv.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                                await dbService.updateAgent(newConv.$id, { [balField]: round2((newConv[balField] || 0) + newConvAmt) });
-                            }
+                    if (payload.conversion_agent_id && (payload.status === 'pending_distribution' || payload.status === 'completed')) {
+                        const convAgent = agents.find(a => a.$id === payload.conversion_agent_id);
+                        if (convAgent) {
+                            await ledgerService.recordEntry({
+                                agent: convAgent,
+                                amount: payload.collected_amount,
+                                currency: payload.collected_currency,
+                                type: 'credit',
+                                reference_type: 'transaction',
+                                reference_id: editTx.$id,
+                                description: `TX #${payload.tx_id} - Conversion for ${payload.client_name} (Revised)`
+                            });
                         }
                     }
 
                     // ── Calculate INR profit from rate spread ──
-                    const profitInr = calcProfitInr(payload.collection_rate, newCur, payload.inr_requested);
+                    const profitInr = calcProfitInr(payload.collection_rate, payload.collected_currency, payload.inr_requested);
                     if (profitInr > 0) payload.profit_inr = profitInr;
 
                     await dbService.updateTransaction(editTx.$id, payload);
                     toast.success('Transaction Updated successfully');
-                    // Optimistic: update tx in state
-                    setTxs(prev => prev.map(t => t.$id === editTx.$id ? { ...t, ...payload } : t));
+                    fetchAll(); // Refresh to ensure state is consistent
                 }
             } else {
                 if (!payload.distributor_id) {
@@ -299,55 +259,40 @@ export default function TransactionsPage() {
                 payload.status = 'completed';
                 payload.actual_inr_distributed = round2(payload.inr_requested);
 
-                // ── Calculate INR profit from rate spread ──
-                const profitInr = calcProfitInr(form.collection_rate, currency, payload.inr_requested);
-                if (profitInr > 0) payload.profit_inr = profitInr;
-
-                // ── Check distributor balance (use round2 to avoid precision bugs) ──
+                const created = await dbService.createTransaction(payload);
+                
+                // ── Update distributor balance and ledger ──
                 const dist = agents.find(a => a.$id === payload.distributor_id);
                 if (dist) {
-                    const currentBal = round2(dist.inr_balance || 0);
-                    const needed = round2(payload.inr_requested);
-                    if (needed > currentBal) {
-                        const confirmMsg = `${dist.name} only has ₹${currentBal.toLocaleString('en-IN')} available.\n\nIf you proceed, ₹${needed.toLocaleString('en-IN')} will be taken, resulting in a negative balance.\n\nDo you want to continue?`;
-                        if (!window.confirm(confirmMsg)) {
-                            isSavingRef.current = false;
-                            setSaving(false);
-                            return;
-                        }
-                    }
-                    const newBal = round2(currentBal - needed);
-                    await dbService.updateAgent(dist.$id, { inr_balance: newBal });
+                    await ledgerService.recordEntry({
+                        agent: dist,
+                        amount: -payload.inr_requested,
+                        currency: 'INR',
+                        type: 'debit',
+                        reference_type: 'transaction',
+                        reference_id: created.$id,
+                        description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
+                    });
                 }
 
-                // ── Update collection agent's owed balance (SAR/AED receivable) ──
+                // ── Update collection agent's balance and ledger ──
                 if (payload.collection_agent_id) {
                     const agent = agents.find(a => a.$id === payload.collection_agent_id);
                     if (agent) {
-                        if (currency === 'AED') {
-                            const newAedBal = round2((agent.aed_balance || 0) + payload.collected_amount);
-                            await dbService.updateAgent(agent.$id, { aed_balance: newAedBal });
-                        } else {
-                            const newSarBal = round2((agent.sar_balance || 0) + payload.collected_amount);
-                            await dbService.updateAgent(agent.$id, { sar_balance: newSarBal });
-                        }
+                        await ledgerService.recordEntry({
+                            agent: agent,
+                            amount: payload.collected_amount,
+                            currency: payload.collected_currency,
+                            type: 'credit',
+                            reference_type: 'transaction',
+                            reference_id: created.$id,
+                            description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
+                        });
                     }
                 }
 
-                const created = await dbService.createTransaction(payload);
                 toast.success('Transaction Logged');
-                // Optimistic: prepend new tx and update agent balances in state
-                setTxs(prev => [{ ...created, ...payload }, ...prev]);
-                // Update agents state for distributor and collection agent balance changes
-                setAgents(prev => prev.map(a => {
-                    let updated = { ...a };
-                    if (dist && a.$id === dist.$id) updated.inr_balance = round2((dist.inr_balance || 0) - round2(payload.inr_requested));
-                    if (payload.collection_agent_id && a.$id === payload.collection_agent_id) {
-                        if (payload.collected_currency === 'AED') updated.aed_balance = round2((a.aed_balance || 0) + payload.collected_amount);
-                        else updated.sar_balance = round2((a.sar_balance || 0) + payload.collected_amount);
-                    }
-                    return updated;
-                }));
+                fetchAll(); // Refresh everything to be safe
             }
             setModal(false);
         } catch (e) { toast.error(e.message); }
@@ -374,24 +319,33 @@ export default function TransactionsPage() {
         setSaving(true);
         try {
             const sarRate = parseFloat(form.sar_to_aed_rate);
-            const actualAed = activeTx.collected_amount / sarRate;
-
-            await dbService.updateTransaction(activeTx.$id, {
+            const updateData = {
                 sar_to_aed_rate: sarRate,
                 actual_aed: actualAed,
                 status: 'pending_distribution',
                 conversion_agent_id: form.conversion_agent_id,
                 conversion_agent_name: form.conversion_agent_name
-            });
+            };
+
+            await dbService.updateTransaction(activeTx.$id, updateData);
+
+            // ── Record ledger entry for conversion agent ──
+            const convAgent = agents.find(a => a.$id === form.conversion_agent_id);
+            if (convAgent) {
+                await ledgerService.recordEntry({
+                    agent: convAgent,
+                    amount: activeTx.collected_amount,
+                    currency: activeTx.collected_currency,
+                    type: 'credit',
+                    reference_type: 'transaction',
+                    reference_id: activeTx.$id,
+                    description: `TX #${activeTx.tx_id} - Received for conversion from ${activeTx.client_name}`
+                });
+            }
+
             toast.success('Conversion Logged');
             setConvertModal(false);
-            // Optimistic: update tx fields in state
-            setTxs(prev => prev.map(t => t.$id === activeTx.$id ? {
-                ...t, sar_to_aed_rate: sarRate, actual_aed: actualAed,
-                status: 'pending_distribution',
-                conversion_agent_id: form.conversion_agent_id,
-                conversion_agent_name: form.conversion_agent_name
-            } : t));
+            fetchAll(); // Refresh everything
         } catch (e) { toast.error(e.message); }
         finally {
             isSavingRef.current = false;
@@ -411,22 +365,19 @@ export default function TransactionsPage() {
             // Calculate Profit in AED
             const profit = calculateProfit(activeTx, activeTx.sar_to_aed_rate, inrRate, inrDist);
 
+            const diff = round2(inrDist - (activeTx.inr_requested || 0));
             const dist = agents.find(a => a.$id === (form.distributor_id || activeTx.distributor_id));
-            if (dist) {
-                const diff = round2(inrDist - (activeTx.inr_requested || 0));
-                if (diff !== 0) {
-                    const currentBal = round2(dist.inr_balance || 0);
-                    if (diff > currentBal) {
-                        const confirmMsg = `${dist.name} only has ₹${currentBal.toLocaleString('en-IN')} available.\n\nIf you proceed, the extra ₹${diff.toLocaleString('en-IN')} will result in a negative balance.\n\nDo you want to continue?`;
-                        if (!window.confirm(confirmMsg)) {
-                            isSavingRef.current = false;
-                            setSaving(false);
-                            return;
-                        }
-                    }
-                    const newBal = round2(currentBal - diff);
-                    await dbService.updateAgent(dist.$id, { inr_balance: newBal });
-                }
+            
+            if (dist && diff !== 0) {
+                await ledgerService.recordEntry({
+                    agent: dist,
+                    amount: -diff,
+                    currency: 'INR',
+                    type: 'debit',
+                    reference_type: 'transaction',
+                    reference_id: activeTx.$id,
+                    description: `TX #${activeTx.tx_id} - INR Adjustment (Orig: ${activeTx.inr_requested}, Actual: ${inrDist})`
+                });
             }
 
             await dbService.updateTransaction(activeTx.$id, {
@@ -437,15 +388,10 @@ export default function TransactionsPage() {
                 distributor_id: form.distributor_id || activeTx.distributor_id,
                 distributor_name: form.distributor_name || activeTx.distributor_name
             });
+
             toast.success('Distribution Complete');
             setDistributeModal(false);
-            // Optimistic: update tx fields in state
-            setTxs(prev => prev.map(t => t.$id === activeTx.$id ? {
-                ...t, aed_to_inr_rate: inrRate, actual_inr_distributed: inrDist,
-                profit_aed: parseFloat(profit), status: 'completed',
-                distributor_id: form.distributor_id || activeTx.distributor_id,
-                distributor_name: form.distributor_name || activeTx.distributor_name
-            } : t));
+            fetchAll(); // Refresh everything
         } catch (e) { toast.error(e.message); }
         finally {
             isSavingRef.current = false;
@@ -486,62 +432,12 @@ export default function TransactionsPage() {
         if (!isAdmin) return toast.error('Only admins can delete transactions');
         if (!confirm(`Delete transaction #${tx.tx_id} for ${tx.client_name}? This cannot be undone.`)) return;
         try {
-            // Reverse distributor balance if transaction was completed
-            if (tx.status === 'completed' && tx.distributor_id && tx.inr_requested) {
-                const dist = agents.find(a => a.$id === tx.distributor_id);
-                if (dist) {
-                    const restored = round2((Number(dist.inr_balance) || 0) + Number(tx.inr_requested));
-                    await dbService.updateAgent(dist.$id, { inr_balance: restored });
-                }
-            }
-            // Reverse collection agent SAR/AED balance
-            if (tx.collection_agent_id && tx.collected_amount) {
-                const agent = agents.find(a => a.$id === tx.collection_agent_id);
-                if (agent) {
-                    if (tx.collected_currency === 'AED') {
-                        const newAedBal = round2((Number(agent.aed_balance) || 0) - Number(tx.collected_amount));
-                        await dbService.updateAgent(agent.$id, { aed_balance: Math.max(0, newAedBal) });
-                    } else {
-                        const newSarBal = round2((Number(agent.sar_balance) || 0) - Number(tx.collected_amount));
-                        await dbService.updateAgent(agent.$id, { sar_balance: Math.max(0, newSarBal) });
-                    }
-                }
-            }
-
-            // Reverse conversion agent balance
-            if (tx.conversion_agent_id && tx.collected_amount) {
-                const convAgent = agents.find(a => a.$id === tx.conversion_agent_id);
-                if (convAgent) {
-                    // Reduce the conversion agent's balance since the conversion is undone
-                    if (convAgent.type === 'conversion_sar') {
-                        const newSarBal = round2((Number(convAgent.sar_balance) || 0) - Number(tx.collected_amount));
-                        await dbService.updateAgent(convAgent.$id, { sar_balance: Math.max(0, newSarBal) });
-                    } else {
-                        const newAedBal = round2((Number(convAgent.aed_balance) || 0) - Number(tx.collected_amount)); // Or actual AED amount depending on currency
-                        await dbService.updateAgent(convAgent.$id, { aed_balance: Math.max(0, newAedBal) });
-                    }
-                }
-            }
+            // ── Reverse all ledger entries for this transaction ──
+            await ledgerService.reverseEntry(tx.$id, 'transaction');
 
             await dbService.deleteTransaction(tx.$id);
             toast.success(`Transaction #${tx.tx_id} deleted`);
-            // Optimistic: remove tx and update agent balances in state
-            setTxs(prev => prev.filter(t => t.$id !== tx.$id));
-            setAgents(prev => prev.map(a => {
-                let updated = { ...a };
-                if (tx.status === 'completed' && tx.distributor_id && a.$id === tx.distributor_id) {
-                    updated.inr_balance = round2((Number(a.inr_balance) || 0) + Number(tx.inr_requested));
-                }
-                if (tx.collection_agent_id && a.$id === tx.collection_agent_id) {
-                    if (tx.collected_currency === 'AED') updated.aed_balance = Math.max(0, round2((Number(a.aed_balance) || 0) - Number(tx.collected_amount)));
-                    else updated.sar_balance = Math.max(0, round2((Number(a.sar_balance) || 0) - Number(tx.collected_amount)));
-                }
-                if (tx.conversion_agent_id && a.$id === tx.conversion_agent_id) {
-                    if (a.type === 'conversion_sar') updated.sar_balance = Math.max(0, round2((Number(a.sar_balance) || 0) - Number(tx.collected_amount)));
-                    else updated.aed_balance = Math.max(0, round2((Number(a.aed_balance) || 0) - Number(tx.collected_amount)));
-                }
-                return updated;
-            }));
+            fetchAll(); // Refresh to ensure state is consistent
         } catch (e) {
             toast.error('Delete failed: ' + e.message);
         }

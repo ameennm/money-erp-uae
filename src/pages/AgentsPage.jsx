@@ -1,30 +1,10 @@
 import { useState, useEffect } from 'react';
 import { authService, dbService, Query } from '../lib/appwrite';
+import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Pencil, Trash2, Users, Phone, MapPin, MessageCircle, Banknote, Download } from 'lucide-react';
-import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
-import * as XLSX from 'xlsx';
+import { Plus, X, Pencil, Trash2, Users, MapPin, Banknote } from 'lucide-react';
 
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
-
-const applyDateRange = (arr, range, from, to) => {
-    if (range === 'All Time') return arr;
-    const now = new Date();
-    let start;
-    if (range === 'Today') start = startOfDay(now);
-    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') start = startOfMonth(now);
-    if (range === 'Custom') {
-        return arr.filter(r => {
-            const d = new Date(r.$createdAt || r.date);
-            const f = from ? new Date(from) : null;
-            const t = to ? new Date(to + 'T23:59:59') : null;
-            return (!f || d >= f) && (!t || d <= t);
-        });
-    }
-    return arr.filter(r => isAfter(new Date(r.$createdAt || r.date), start));
-};
 
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
@@ -37,9 +17,6 @@ export default function AgentsPage() {
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
-    const [dateRange, setDateRange] = useState('All Time');
-    const [customFrom, setCustomFrom] = useState('');
-    const [customTo, setCustomTo] = useState('');
     const [editItem, setEditItem] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
@@ -136,18 +113,9 @@ export default function AgentsPage() {
         const amt = round2(parseFloat(paymentAmount) || 0);
         if (!amt || amt <= 0) return toast.error('Enter a valid payment amount');
         const cur = paymentAgent.currency || 'SAR';
-        const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
-        const currentOwed = round2(paymentAgent[owedField] || 0);
-        if (amt > currentOwed + 0.01) {
-            return toast.error(`Agent owes us ${currentOwed.toLocaleString()} ${cur}. Cannot record more than owed.`);
-        }
         setSaving(true);
         try {
-            // 1. Reduce agent's owed balance
-            const newOwed = Math.max(0, round2(currentOwed - amt));
-            await dbService.updateAgent(paymentAgent.$id, { [owedField]: newOwed });
-
-            // 2. Record payment as income (increases our SAR/AED balance on dashboard)
+            // 1. Record payment as income expense for dashboard
             const expensePayload = {
                 title: `Agent Payment — ${paymentAgent.name}`,
                 type: 'income',
@@ -159,11 +127,20 @@ export default function AgentsPage() {
             };
             const createdExpense = await dbService.createExpense(expensePayload);
 
+            // 2. Record Ledger entry (automatically updates agent balance)
+            await ledgerService.recordEntry({
+                agent: paymentAgent,
+                amount: -amt, // Negative because agent is paying us back (reducing their debt)
+                currency: cur,
+                type: 'payment',
+                reference_type: 'expense',
+                reference_id: createdExpense.$id,
+                description: `Payment received from ${paymentAgent.name}`
+            });
+
             toast.success(`✅ Recorded ${amt.toLocaleString()} ${cur} received from ${paymentAgent.name}`);
             setPaymentModal(false);
-            // Optimistic: update agent balance and add expense record to state
-            setAgents(prev => prev.map(a => a.$id === paymentAgent.$id ? { ...a, [owedField]: newOwed } : a));
-            setExpenseRecs(prev => [{ ...createdExpense, ...expensePayload }, ...prev]);
+            fetchAll();
         } catch (err) {
             toast.error('Failed: ' + err.message);
         } finally {
@@ -171,99 +148,6 @@ export default function AgentsPage() {
         }
     };
 
-    const handleDeleteRecord = async (e, r) => {
-        e.stopPropagation();
-        if (!window.confirm('Delete this record? This cannot be undone.')) return;
-        try {
-            setSaving(true);
-            if (r.record_type === 'collection') {
-                toast.error('To delete a transaction, please go to the Transactions page.');
-            } else if (r.record_type === 'payment') {
-                if (viewingAgent) {
-                    const undoBal = Number(r.amount);
-                    if (undoBal) {
-                        const balField = viewingAgent.currency === 'AED' ? 'aed_balance' : 'sar_balance';
-                        const newBal = round2((Number(viewingAgent[balField]) || 0) + undoBal);
-                        await dbService.updateAgent(viewingAgent.$id, { [balField]: newBal });
-                        // Optimistic: update agent balance in state
-                        setAgents(prev => prev.map(a => a.$id === viewingAgent.$id ? { ...a, [balField]: newBal } : a));
-                        setViewingAgent(prev => ({ ...prev, [balField]: newBal }));
-                    }
-                }
-                await dbService.deleteExpense(r.$id);
-                toast.success('Payment deleted');
-                // Optimistic: remove expense from state
-                setExpenseRecs(prev => prev.filter(e => e.$id !== r.$id));
-            }
-        } catch (err) {
-            toast.error(err.message);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    // Build agent ledger with running per-row paid/owed
-    // Build agent ledger with running per-row paid/owed
-    const getAgentTxs = (agentId, agentName) => {
-        let agentRecords = txs.filter(t => t.collection_agent_id === agentId).map(t => ({
-            ...t,
-            record_type: 'collection',
-            date_time: new Date(t.$createdAt)
-        }));
-
-        let paymentRecords = expenseRecs.filter(e => e.category === 'Agent Payment' && e.title.includes(agentName)).map(e => ({
-            ...e,
-            record_type: 'payment',
-            date_time: new Date(e.$createdAt || e.date)
-        }));
-
-        let combined = [...agentRecords, ...paymentRecords];
-        combined.sort((a, b) => a.date_time - b.date_time);
-
-        let cumulativeCollected = 0;
-        let cumulativePaid = 0;
-        return combined.map(t => {
-            if (t.record_type === 'collection') {
-                cumulativeCollected += Number(t.collected_amount) || 0;
-            } else {
-                cumulativePaid += Number(t.amount) || 0;
-            }
-            return { ...t, cumulative_collected: cumulativeCollected, cumulative_paid: cumulativePaid };
-        });
-    };
-
-    const shareAgentLedgerOnWhatsApp = (agent, filteredTxs) => {
-        const cur = agent.currency || 'SAR';
-        const totalCollected = filteredTxs.reduce((s, t) => s + (Number(t.collected_amount) || 0), 0);
-        const owedBal = cur === 'AED'
-            ? round2(agent.aed_balance || 0)
-            : round2(agent.sar_balance || 0);
-        const paidToUs = round2(Math.max(0, totalCollected - owedBal));
-
-        const lines = [
-            `📋 *Agent Ledger: ${agent.name}*`,
-            `Period: ${dateRange}`,
-            `─────────────────────`,
-            ...filteredTxs.slice(0, 25).map((t, i) => {
-                if (t.record_type === 'collection') {
-                    return `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | COL #${t.tx_id} | ${t.client_name} | ${Number(t.collected_amount).toLocaleString()} ${t.collected_currency}`;
-                } else {
-                    return `${i + 1}. ${t.$createdAt ? format(new Date(t.$createdAt), 'dd MMM') : ''} | PAY | Payment Received | ${Number(t.amount).toLocaleString()} ${t.currency}`;
-                }
-            }),
-            filteredTxs.length > 25 ? `...and ${filteredTxs.length - 25} more records` : '',
-            `─────────────────────`,
-            `Total Collected: *${totalCollected.toLocaleString()} ${cur}*`,
-            `They Paid to Us: *${paidToUs.toLocaleString()} ${cur}*`,
-            `Amount Owed to Us: *${owedBal.toLocaleString()} ${cur}*`,
-            `Transactions: ${filteredTxs.length}`,
-            ``,
-            `_MoneyFlow ERP_`,
-        ].filter(l => l !== undefined);
-
-        const text = encodeURIComponent(lines.join('\n'));
-        window.open(`https://wa.me/?text=${text}`, '_blank');
-    };
 
     // ── Overall summary across all collection agents ──
     const totalSarOwed = round2(agents.reduce((s, a) => s + (a.sar_balance || 0), 0));
@@ -464,220 +348,7 @@ export default function AgentsPage() {
             )}
 
             {/* History Modal */}
-            {viewingAgent && (() => {
-                const allTxs = getAgentTxs(viewingAgent.$id, viewingAgent.name);
-                const filteredTxs = applyDateRange(allTxs, dateRange, customFrom, customTo);
-                const cur = viewingAgent.currency || 'SAR';
-                const owedBal = cur === 'AED'
-                    ? round2(viewingAgent.aed_balance || 0)
-                    : round2(viewingAgent.sar_balance || 0);
-
-                const allTimeCollected = allTxs.filter(t => t.record_type === 'collection').reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
-                const paidToUsTotal = allTxs.filter(t => t.record_type === 'payment').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-
-                const exportLedgerExcel = () => {
-                    const rows = filteredTxs.map((t, idx) => {
-                        const isCollection = t.record_type === 'collection';
-                        const sarGot = isCollection ? (Number(t.collected_amount) || 0) : 0;
-                        const paymentAmt = !isCollection ? (Number(t.amount) || 0) : 0;
-                        const cumCollected = Number(t.cumulative_collected) || 0;
-                        const cumPaid = Number(t.cumulative_paid) || 0;
-
-                        // rowOwedToUs is cumulative collected minus cumulative paid
-                        const rowOwedToUs = round2(Math.max(0, cumCollected - cumPaid));
-
-                        return {
-                            '#': idx + 1,
-                            'Date': t.date_time ? format(t.date_time, 'dd MMM yyyy') : '',
-                            'Type': isCollection ? 'Collection' : 'Payment',
-                            'Distributor': t.distributor_name || '',
-                            'Conversion Rate': isCollection ? (Number(t.collection_rate) || '') : '',
-                            'INR to Distribute': isCollection ? (Number(t.inr_requested) || '') : '',
-                            'Collected Base Ext': sarGot,
-                            'Currency': isCollection ? (t.collected_currency || cur) : t.currency,
-                            'They Paid Amount': paymentAmt,
-                            'They Owed Us': rowOwedToUs,
-                        };
-                    });
-                    const ws = XLSX.utils.json_to_sheet(rows);
-                    const wb = XLSX.utils.book_new();
-                    XLSX.utils.book_append_sheet(wb, ws, viewingAgent.name);
-                    XLSX.writeFile(wb, `agent_${viewingAgent.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-                };
-
-                return (
-                    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setViewingAgent(null)}>
-                        <div className="modal" style={{ maxWidth: '1000px', width: '95%', maxHeight: '90vh' }}>
-                            <div className="modal-header">
-                                <div>
-                                    <h3 className="modal-title">Transaction Ledger: {viewingAgent.name}</h3>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        Collections assigned to this agent
-                                    </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    {owedBal > 0 && (
-                                        <button
-                                            className="btn btn-sm"
-                                            style={{ background: '#00c896', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
-                                            onClick={() => { setViewingAgent(null); openPayment(viewingAgent); }}
-                                            title="Record payment received from this agent"
-                                        >
-                                            <Banknote size={15} /> Receive
-                                        </button>
-                                    )}
-                                    <button className="btn btn-outline btn-sm" onClick={exportLedgerExcel} title="Export to Excel">
-                                        <Download size={14} /> Excel
-                                    </button>
-                                    <button
-                                        className="btn btn-sm"
-                                        style={{ background: '#25D366', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
-                                        onClick={() => shareAgentLedgerOnWhatsApp(viewingAgent, filteredTxs)}
-                                        title="Share on WhatsApp"
-                                    >
-                                        <MessageCircle size={15} /> WhatsApp
-                                    </button>
-                                    <button className="close-btn" onClick={() => setViewingAgent(null)}><X size={20} /></button>
-                                </div>
-                            </div>
-                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
-                                {/* Filters */}
-                                <div className="flex flex-wrap gap-2">
-                                    {DATE_RANGES.map(r => (
-                                        <button key={r} onClick={() => setDateRange(r)}
-                                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
-                                    ))}
-                                    {dateRange === 'Custom' && (
-                                        <>
-                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
-                                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-                                            <span style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>to</span>
-                                            <input type="date" className="form-input" style={{ maxWidth: 130, padding: '4px 8px', fontSize: 13 }}
-                                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
-                                        </>
-                                    )}
-                                </div>
-
-                                {/* Summary Cards */}
-                                {(() => {
-                                    const periodCollected = filteredTxs.filter(t => t.record_type === 'collection').reduce((sum, t) => sum + (Number(t.collected_amount) || 0), 0);
-                                    return (
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-                                            <div className="card" style={{ padding: '14px', background: 'rgba(74,158,255,0.05)' }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Period SAR We Got</div>
-                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-primary)' }}>
-                                                    {periodCollected.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
-                                                </div>
-                                            </div>
-                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.12)' }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total Collected (All Time)</div>
-                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                                    {allTimeCollected.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
-                                                </div>
-                                            </div>
-                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.06)', border: '1px solid rgba(0,200,150,0.18)' }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Paid</div>
-                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                                    {paidToUsTotal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
-                                                </div>
-                                            </div>
-                                            <div className="card" style={{ padding: '14px', background: 'rgba(0,200,150,0.05)' }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Transaction Count</div>
-                                                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                                    {filteredTxs.length}
-                                                </div>
-                                            </div>
-                                            <div className="card" style={{ padding: '14px', background: cur === 'AED' ? 'rgba(245,166,35,0.07)' : 'rgba(74,158,255,0.07)', border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.2)' : 'rgba(74,158,255,0.2)'}` }}>
-                                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Balance</div>
-                                                <div style={{ fontSize: '18px', fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
-                                                    {owedBal.toLocaleString()} <span style={{ fontSize: 11 }}>{cur}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-
-                                <div className="table-wrapper" style={{ flex: 1 }}>
-                                    <table className="data-table" style={{ fontSize: 13 }}>
-                                        <thead>
-                                            <tr>
-                                                <th style={{ width: 30 }}>#</th>
-                                                <th>Date</th>
-                                                <th>Distributor</th>
-                                                <th style={{ textAlign: 'right' }}>Conv. Rate<br /><span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>per 1000 INR</span></th>
-                                                <th style={{ textAlign: 'right' }}>INR to Distribute</th>
-                                                <th style={{ textAlign: 'right' }}>SAR We Got</th>
-                                                <th style={{ textAlign: 'right' }}>Paid</th>
-                                                <th style={{ textAlign: 'right' }}>Balance</th>
-                                                <th style={{ textAlign: 'right' }}>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredTxs.length === 0 ? (
-                                                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No records found for active filters.</td></tr>
-                                            ) : (
-                                                filteredTxs.map((t, idx) => {
-                                                    const isCollection = t.record_type === 'collection';
-                                                    const sarGot = isCollection ? (Number(t.collected_amount) || 0) : 0;
-                                                    const cumCollected = Number(t.cumulative_collected) || 0;
-                                                    const paymentAmt = !isCollection ? (Number(t.amount) || 0) : 0;
-                                                    const cumPaid = Number(t.cumulative_paid) || 0;
-
-                                                    // Running owed: cumulative collected minus cumulative paid
-                                                    const rowOwedToUs = round2(Math.max(0, cumCollected - cumPaid));
-
-                                                    return (
-                                                        <tr key={t.$id}>
-                                                            <td style={{ color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                                            <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                                                                <span className={`badge ${isCollection ? 'badge-collector' : 'badge-completed'}`} style={{ marginRight: 6 }}>
-                                                                    {isCollection ? 'COL' : 'PAY'}
-                                                                </span>
-                                                                {t.date_time ? format(t.date_time, 'dd MMM yy HH:mm') : '—'}
-                                                            </td>
-                                                            <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                                                {isCollection ? (t.distributor_name || '—') : '—'}
-                                                            </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--brand-primary)' }}>
-                                                                {isCollection && t.collection_rate ? Number(t.collection_rate).toLocaleString() : '—'}
-                                                            </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                                                {isCollection && t.inr_requested ? '₹' + Number(t.inr_requested).toLocaleString('en-IN') : '—'}
-                                                            </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
-                                                                {isCollection ? (sarGot.toLocaleString() + ' ') : '—'}
-                                                                {isCollection && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.collected_currency}</span>}
-                                                            </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-accent)' }}>
-                                                                {!isCollection ? (paymentAmt.toLocaleString() + ' ') : '—'}
-                                                                {!isCollection && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>}
-                                                            </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 800, color: rowOwedToUs > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
-                                                                {rowOwedToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
-                                                            </td>
-                                                            <td style={{ textAlign: 'right' }}>
-                                                                <button style={{ marginRight: 6 }} className="btn btn-outline btn-sm btn-icon" onClick={() => {
-                                                                    if (isCollection) window.open(`/transactions?q=${t.tx_id}`, '_blank');
-                                                                    else window.open(`/expenses`, '_blank');
-                                                                }}>
-                                                                    <Pencil size={12} />
-                                                                </button>
-                                                                <button className="btn btn-danger btn-sm btn-icon" onClick={(e) => handleDeleteRecord(e, t)} title="Delete Record">
-                                                                    <Trash2 size={12} />
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+            <LedgerModal agent={viewingAgent} onClose={() => setViewingAgent(null)} />
 
             {/* Add/Edit Modal */}
             {modal && (

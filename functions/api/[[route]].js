@@ -74,6 +74,7 @@ const crud = (path, table, getSort = 'createdAt DESC') => {
         expenses: ['title', 'category', 'amount', 'currency', 'date', 'notes', 'type', 'distributor_id', 'distributor_name'],
         credits: ['from_person', 'reason', 'amount_sar', 'date', 'admin_approved'],
         aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date'],
+        ledger_entries: ['agent_id', 'agent_name', 'amount', 'currency', 'type', 'reference_type', 'reference_id', 'description', 'running_balance'],
     };
 
     app.put(`/${path}/:id`, async (c) => {
@@ -108,6 +109,7 @@ crud('employees', 'employees')
 crud('expenses', 'expenses')
 crud('credits', 'credits')
 crud('aed_conversions', 'aed_conversions')
+crud('ledger_entries', 'ledger_entries', 'createdAt DESC')
 
 app.get('/settings', async (c) => {
     const { results } = await c.env.DB.prepare('SELECT * FROM settings WHERE id = ?').bind('global_settings').all()
