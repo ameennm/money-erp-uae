@@ -291,6 +291,22 @@ export default function TransactionsPage() {
                     }
                 }
 
+                // ── Update conversion agent's balance and ledger ──
+                if (payload.conversion_agent_id) {
+                    const convAgent = agents.find(a => a.$id === payload.conversion_agent_id);
+                    if (convAgent) {
+                        await ledgerService.recordEntry({
+                            agent: convAgent,
+                            amount: payload.collected_amount,
+                            currency: payload.collected_currency,
+                            type: 'credit',
+                            reference_type: 'transaction',
+                            reference_id: created.$id,
+                            description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
+                        });
+                    }
+                }
+
                 toast.success('Transaction Logged');
                 fetchAll(); // Refresh everything to be safe
             }

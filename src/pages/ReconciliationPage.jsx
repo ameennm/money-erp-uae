@@ -89,23 +89,22 @@ export default function ReconciliationPage() {
                 dbService.listLedgerEntries()
             ]);
 
-            const existingRefs = new Set(existingLedger.documents.map(l => l.related_id));
+            const existingRefs = new Set(existingLedger.documents.map(l => l.reference_id));
             let createdCount = 0;
 
             // 2. Process Transactions (Distribution & Collection)
             for (const tx of txs.documents) {
                 // Agent Collection
-                if (tx.agent_id && !existingRefs.has(tx.$id + '_coll')) {
+                if (tx.collection_agent_id && !existingRefs.has(tx.$id + '_coll')) {
                     await dbService.createLedgerEntry({
-                        agent_id: tx.agent_id,
-                        agent_name: tx.agent_name,
-                        agent_type: 'agent',
-                        amount: Number(tx.sar_amount),
+                        agent_id: tx.collection_agent_id,
+                        agent_name: tx.collection_agent_name,
+                        amount: Number(tx.collected_amount),
                         currency: 'SAR',
-                        type: 'collection',
-                        description: `Automated Sync: Collection for transaction #${tx.display_id || tx.$id.slice(-6)}`,
-                        related_id: tx.$id + '_coll',
-                        date: tx.date || new Date().toISOString()
+                        type: 'debit',
+                        reference_type: 'transaction',
+                        description: `Automated Sync: Collection for transaction #${tx.tx_id || tx.$id.slice(-6)}`,
+                        reference_id: tx.$id + '_coll'
                     });
                     createdCount++;
                 }
@@ -115,29 +114,27 @@ export default function ReconciliationPage() {
                     await dbService.createLedgerEntry({
                         agent_id: tx.distributor_id,
                         agent_name: tx.distributor_name,
-                        agent_type: 'distributor',
-                        amount: Number(tx.aed_amount),
+                        amount: Number(tx.actual_aed),
                         currency: 'AED',
-                        type: 'distribution',
-                        description: `Automated Sync: Distribution for transaction #${tx.display_id || tx.$id.slice(-6)}`,
-                        related_id: tx.$id + '_dist',
-                        date: tx.date || new Date().toISOString()
+                        type: 'debit',
+                        reference_type: 'transaction',
+                        description: `Automated Sync: Distribution for transaction #${tx.tx_id || tx.$id.slice(-6)}`,
+                        reference_id: tx.$id + '_dist'
                     });
                     createdCount++;
                 }
 
                 // Conversion Agent logic
-                if (tx.conv_agent_id && !existingRefs.has(tx.$id + '_conv')) {
+                if (tx.conversion_agent_id && !existingRefs.has(tx.$id + '_conv')) {
                     await dbService.createLedgerEntry({
-                        agent_id: tx.conv_agent_id,
-                        agent_name: tx.conv_agent_name,
-                        agent_type: 'conversion_agent',
-                        amount: Number(tx.sar_amount),
-                        currency: 'SAR',
-                        type: 'conversion_receive',
-                        description: `Automated Sync: Individual conversion #${tx.display_id || tx.$id.slice(-6)}`,
-                        related_id: tx.$id + '_conv',
-                        date: tx.date || new Date().toISOString()
+                        agent_id: tx.conversion_agent_id,
+                        agent_name: tx.conversion_agent_name,
+                        amount: Number(tx.collected_amount), // Use the SAR collected amount
+                        currency: tx.collected_currency || 'SAR',
+                        type: 'credit',
+                        reference_type: 'transaction',
+                        description: `Automated Sync: Individual conversion #${tx.tx_id || tx.$id.slice(-6)}`,
+                        reference_id: tx.$id + '_conv'
                     });
                     createdCount++;
                 }
@@ -147,77 +144,148 @@ export default function ReconciliationPage() {
             for (const exp of exps.documents) {
                 if (existingRefs.has(exp.$id)) continue;
 
-                if (exp.category === 'Agent Payment' && exp.agent_id) {
-                    await dbService.createLedgerEntry({
-                        agent_id: exp.agent_id,
-                        agent_name: exp.agent_name,
-                        agent_type: 'agent',
-                        amount: -Number(exp.amount),
-                        currency: exp.currency || 'SAR',
-                        type: 'payment',
-                        description: `Automated Sync: Payment record ${exp.notes || ''}`,
-                        related_id: exp.$id,
-                        date: exp.date || new Date().toISOString()
-                    });
-                    createdCount++;
-                } else if (exp.category === 'Distributor Deposit' && exp.agent_id) {
-                    await dbService.createLedgerEntry({
-                        agent_id: exp.agent_id,
-                        agent_name: exp.agent_name,
-                        agent_type: 'distributor',
-                        amount: -Number(exp.amount),
-                        currency: exp.currency || 'AED',
-                        type: 'deposit',
-                        description: `Automated Sync: Deposit record ${exp.notes || ''}`,
-                        related_id: exp.$id,
-                        date: exp.date || new Date().toISOString()
-                    });
-                    createdCount++;
-                } else if (exp.category === 'Conversion Deposit' && exp.agent_id) {
-                    await dbService.createLedgerEntry({
-                        agent_id: exp.agent_id,
-                        agent_name: exp.agent_name,
-                        agent_type: 'conversion_agent',
-                        amount: -Number(exp.amount),
-                        currency: exp.currency || 'SAR',
-                        type: 'conversion_deposit',
-                        description: `Automated Sync: Conversion Deposit ${exp.notes || ''}`,
-                        related_id: exp.$id,
-                        date: exp.date || new Date().toISOString()
-                    });
-                    createdCount++;
-                } else if (exp.category === 'Conversion Receipt' && exp.agent_id) {
-                    // This is when we receive AED/INR back from agent
-                    await dbService.createLedgerEntry({
-                        agent_id: exp.agent_id,
-                        agent_name: exp.agent_name,
-                        agent_type: 'conversion_agent',
-                        amount: Number(exp.source_amount || exp.amount), // The SAR/AED cleared
-                        currency: exp.source_currency || 'SAR',
-                        type: 'conversion_receive',
-                        description: `Automated Sync: Conversion Receipt ${exp.notes || ''}`,
-                        related_id: exp.$id,
-                        date: exp.date || new Date().toISOString()
-                    });
-                    createdCount++;
+                // Match either by ID or Name (for historical compatibility)
+                if (exp.distributor_id || exp.distributor_name) {
+                    const matchedAgent = agts.documents.find(a => 
+                        (exp.distributor_id && a.$id === exp.distributor_id) || 
+                        (exp.distributor_name && a.name === exp.distributor_name)
+                    );
+
+                    if (matchedAgent) {
+                        const targetId = matchedAgent.$id;
+                        const targetName = matchedAgent.name;
+
+                        if (exp.category === 'Agent Payment') {
+                            await dbService.createLedgerEntry({
+                                agent_id: targetId,
+                                agent_name: targetName,
+                                amount: Number(exp.amount),
+                                currency: exp.currency || 'SAR',
+                                type: 'debit',
+                                reference_type: 'expense',
+                                description: `Automated Sync: Payment record ${exp.notes || ''}`,
+                                reference_id: exp.$id
+                            });
+                            createdCount++;
+                        } else if (exp.category === 'Distributor Deposit') {
+                            await dbService.createLedgerEntry({
+                                agent_id: targetId,
+                                agent_name: targetName,
+                                amount: Number(exp.amount),
+                                currency: exp.currency || 'AED',
+                                type: 'credit',
+                                reference_type: 'expense',
+                                description: `Automated Sync: Deposit record ${exp.notes || ''}`,
+                                reference_id: exp.$id
+                            });
+                            createdCount++;
+                        } else if (exp.category === 'Conversion Deposit') {
+                            await dbService.createLedgerEntry({
+                                agent_id: targetId,
+                                agent_name: targetName,
+                                amount: Number(exp.amount),
+                                currency: exp.currency || 'SAR',
+                                type: 'credit',
+                                reference_type: 'expense',
+                                description: `Automated Sync: Conversion Deposit ${exp.notes || ''}`,
+                                reference_id: exp.$id
+                            });
+                            createdCount++;
+                        } else if (exp.category === 'Conversion Receipt') {
+                            let clearedAmt = 0;
+                            const match = exp.notes?.match(/Sourced from ([\d,.]+) /);
+                            if (match) clearedAmt = Number(match[1].replace(/,/g, ''));
+                            else clearedAmt = Number(exp.amount);
+
+                            const clearedCur = exp.notes?.includes('SAR') ? 'SAR' : 'AED';
+
+                            await dbService.createLedgerEntry({
+                                agent_id: targetId,
+                                agent_name: targetName,
+                                amount: clearedAmt, 
+                                currency: clearedCur,
+                                type: 'debit',
+                                reference_type: 'expense',
+                                description: `Automated Sync: Conversion Receipt ${exp.notes || ''}`,
+                                reference_id: exp.$id
+                            });
+                            createdCount++;
+                        } else if (exp.category === 'AED→INR Conversion') {
+                            // Recording the AED side for the agent
+                            if (exp.currency === 'AED') {
+                                await dbService.createLedgerEntry({
+                                    agent_id: targetId,
+                                    agent_name: targetName,
+                                    amount: Number(exp.amount),
+                                    currency: 'AED',
+                                    type: 'debit',
+                                    reference_type: 'expense',
+                                    description: `Automated Sync: AED→INR Conversion (AED Side)`,
+                                    reference_id: exp.$id
+                                });
+                                createdCount++;
+                            } else if (exp.currency === 'INR') {
+                                // Recording the INR side (Agent credit since they provided the INR)
+                                await dbService.createLedgerEntry({
+                                    agent_id: targetId,
+                                    agent_name: targetName,
+                                    amount: Number(exp.amount),
+                                    currency: 'INR',
+                                    type: 'credit',
+                                    reference_type: 'expense',
+                                    description: `Automated Sync: AED→INR Conversion (INR Side)`,
+                                    reference_id: exp.$id
+                                });
+                                createdCount++;
+                            }
+                        }
+                    }
                 }
             }
 
-            // 4. Process Bulk Conversions
+            // 4. Process Bulk Conversions (Double entry for source and target)
             for (const bulk of bulks.documents) {
-                if (bulk.agent_id && !existingRefs.has(bulk.$id)) {
+                if (!bulk.conversion_agent_id) continue;
+
+                // A. Source Side (Agent receives funds to convert - Credit)
+                if (!existingRefs.has(bulk.$id + '_src')) {
+                    const srcAmt = Number(bulk.sar_amount || bulk.aed_amount);
+                    const srcCur = bulk.sar_amount ? 'SAR' : 'AED';
+                    
                     await dbService.createLedgerEntry({
-                        agent_id: bulk.agent_id,
-                        agent_name: bulk.agent_name,
-                        agent_type: 'conversion_agent',
-                        amount: Number(bulk.sar_amount || bulk.aed_amount),
-                        currency: bulk.sar_amount ? 'SAR' : 'AED',
-                        type: 'conversion_receive',
-                        description: `Automated Sync: Bulk conversion sync`,
-                        related_id: bulk.$id,
-                        date: bulk.date || new Date().toISOString()
+                        agent_id: bulk.conversion_agent_id,
+                        agent_name: bulk.conversion_agent_name,
+                        amount: srcAmt,
+                        currency: srcCur,
+                        type: 'credit', 
+                        reference_type: 'aed_conversion',
+                        description: `Automated Sync: Bulk conversion source (${srcCur})`,
+                        reference_id: bulk.$id + '_src'
                     });
                     createdCount++;
+                }
+
+                // B. Target Side (Agent returns converted funds - Debit)
+                if (!existingRefs.has(bulk.$id + '_tgt')) {
+                    // For SAR->AED, target is AED. For AED->INR, target is INR.
+                    // The schema for aed_conversions primarily stores sar_amount and aed_amount.
+                    // If both exist, it's SAR -> AED.
+                    // If only aed_amount exists? (Need to check how AED->INR is stored)
+                    
+                    if (bulk.sar_amount && bulk.aed_amount) {
+                         // SAR -> AED: Agent gives us AED
+                         await dbService.createLedgerEntry({
+                            agent_id: bulk.conversion_agent_id,
+                            agent_name: bulk.conversion_agent_name,
+                            amount: Number(bulk.aed_amount),
+                            currency: 'AED',
+                            type: 'debit',
+                            reference_type: 'aed_conversion',
+                            description: `Automated Sync: Bulk conversion target (AED)`,
+                            reference_id: bulk.$id + '_tgt'
+                        });
+                        createdCount++;
+                    }
                 }
             }
 
@@ -245,23 +313,25 @@ export default function ReconciliationPage() {
             for (const agent of agts.documents) {
                 const entries = ledger.documents.filter(l => l.agent_id === agent.$id);
                 
-                // Agents have SAR balance
-                // Distributors have AED balance
-                // Conversion Agents have SAR or AED balance depending on type
-                
                 let newSar = 0;
                 let newAed = 0;
+                let newInr = 0;
 
                 entries.forEach(e => {
-                    if (e.currency === 'SAR') newSar += Number(e.amount);
-                    if (e.currency === 'AED') newAed += Number(e.amount);
+                    // Credit adds to balance, Debit subtracts
+                    const amt = e.type === 'credit' ? Number(e.amount) : -Number(e.amount);
+
+                    if (e.currency === 'SAR') newSar += amt;
+                    if (e.currency === 'AED') newAed += amt;
+                    if (e.currency === 'INR') newInr += amt;
                 });
 
                 // Only update if changed
-                if (agent.sar_balance !== newSar || agent.aed_balance !== newAed) {
+                if (agent.sar_balance !== newSar || agent.aed_balance !== newAed || agent.inr_balance !== newInr) {
                     await dbService.updateAgent(agent.$id, {
                         sar_balance: newSar,
-                        aed_balance: newAed
+                        aed_balance: newAed,
+                        inr_balance: newInr
                     });
                     updatedCount++;
                 }
@@ -374,7 +444,7 @@ export default function ReconciliationPage() {
                 <p className="text-secondary" style={{ fontSize: 14, margin: '8px 0 0' }}>
                     The "Sync & Rebuild" tool will scan all historical transactions and expenses. 
                     It checks if a ledger entry already exists for each event. 
-                    If not, it creates a new one. This is safe to run multiple times as it uses "related_id" to prevent duplicates.
+                    If not, it creates a new one. This is safe to run multiple times as it uses "reference_id" to prevent duplicates.
                     Use "Sync Balances" after rebuilding to ensure the main agents list shows the correct totals.
                 </p>
             </div>

@@ -19,6 +19,7 @@ const fetchApi = async (path, options = {}) => {
 export const Query = {
     equal: (key, val) => ({ type: 'equal', key, val }),
     orderDesc: (key) => ({ type: 'orderDesc', key }),
+    orderAsc: (key) => ({ type: 'orderAsc', key }),
     limit: (val) => ({ type: 'limit', val }),
     or: (subQueries) => ({ type: 'or', subQueries }),
 };
@@ -72,6 +73,8 @@ const applyQueries = (data, queries = []) => {
             filtered = filtered.filter(item => q.subQueries.some(sub => matchesQuery(item, sub)));
         } else if (q.type === 'orderDesc') {
             filtered.sort((a, b) => new Date(b[q.key] || 0) - new Date(a[q.key] || 0));
+        } else if (q.type === 'orderAsc') {
+            filtered.sort((a, b) => new Date(a[q.key] || 0) - new Date(b[q.key] || 0));
         } else if (q.type === 'limit') {
             filtered = filtered.slice(0, q.val);
         }

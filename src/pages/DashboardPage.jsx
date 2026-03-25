@@ -153,7 +153,9 @@ export default function DashboardPage() {
                 amount: safeFloat(aedAmt),
                 currency: 'AED',
                 date: new Date().toISOString().split('T')[0],
-                notes: `Agent: ${inrForm.conversion_agent_name} | Converted ${aedAmt} AED at rate ${rate}`
+                notes: `Agent: ${inrForm.conversion_agent_name} | Converted ${aedAmt} AED at rate ${rate}`,
+                distributor_id: inrForm.conversion_agent_id,
+                distributor_name: inrForm.conversion_agent_name
             });
 
             // Create INR income (money entering INR undistributed pool)
@@ -164,7 +166,9 @@ export default function DashboardPage() {
                 amount: safeFloat(inrAmount),
                 currency: 'INR',
                 date: new Date().toISOString().split('T')[0],
-                notes: `Received ₹${inrAmount.toLocaleString('en-IN')} from ${aedAmt} AED at rate ${rate}`
+                notes: `Received ₹${inrAmount.toLocaleString('en-IN')} from ${aedAmt} AED at rate ${rate}`,
+                distributor_id: inrForm.conversion_agent_id,
+                distributor_name: inrForm.conversion_agent_name
             });
 
             toast.success(`Converted ${aedAmt} AED → ₹${inrAmount.toLocaleString('en-IN')} via ${inrForm.conversion_agent_name}`);

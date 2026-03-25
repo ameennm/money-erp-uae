@@ -133,7 +133,7 @@ export default function AgentsPage() {
                 agent: paymentAgent,
                 amount: -amt, // Negative because agent is paying us back (reducing their debt)
                 currency: cur,
-                type: 'payment',
+                type: 'debit',
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Payment received from ${paymentAgent.name}`
@@ -141,7 +141,7 @@ export default function AgentsPage() {
 
             toast.success(`✅ Recorded ${amt.toLocaleString()} ${cur} received from ${paymentAgent.name}`);
             setPaymentModal(false);
-            fetchAll();
+            fetch();
         } catch (err) {
             toast.error('Failed: ' + err.message);
         } finally {

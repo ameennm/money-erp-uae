@@ -74,7 +74,7 @@ export default function DistributorsPage() {
             if (amt > availableINR) {
                 setSaving(false);
                 return toast.error(
-                    `Insufficient INR! Only ₹${availableINR.toLocaleString('en-IN')} available. Cannot deposit ₹${amt.toLocaleString('en-IN')}.`,
+                    `Insufficient INR! Only ₹${(availableINR || 0).toLocaleString('en-IN')} available. Cannot deposit ₹${(amt || 0).toLocaleString('en-IN')}.`,
                     { duration: 5000 }
                 );
             }
@@ -87,7 +87,7 @@ export default function DistributorsPage() {
                 amount: round2(amt),
                 currency: 'INR',
                 date: new Date().toISOString().split('T')[0],
-                notes: depositNote || `Deposited ₹${amt.toLocaleString('en-IN')} to ${editItem.name}`,
+                notes: depositNote || `Deposited ₹${(amt || 0).toLocaleString('en-IN')} to ${editItem.name}`,
                 distributor_id: editItem.$id,
                 distributor_name: editItem.name
             });
@@ -100,10 +100,10 @@ export default function DistributorsPage() {
                 type: 'credit',
                 reference_type: 'expense',
                 reference_id: expense.$id,
-                description: depositNote || `Deposit of ₹${amt.toLocaleString('en-IN')}`
+                description: depositNote || `Deposit of ₹${(amt || 0).toLocaleString('en-IN')}`
             });
 
-            toast.success(`₹${amt.toLocaleString('en-IN')} deposited to ${editItem.name}`);
+            toast.success(`₹${(amt || 0).toLocaleString('en-IN')} deposited to ${editItem.name}`);
             setDepositModal(false);
             fetchAll(); 
         } catch (e) { toast.error('Deposit failed: ' + e.message); }
@@ -147,7 +147,7 @@ export default function DistributorsPage() {
         if (!transferTo) return toast.error('Select a target distributor');
         const fromBal = round2(transferFrom.inr_balance || 0);
         if (amt > fromBal + 0.01) {
-            return toast.error(`${transferFrom.name} only has ₹${fromBal.toLocaleString('en-IN')} available`);
+            return toast.error(`${transferFrom.name} only has ₹${(fromBal || 0).toLocaleString('en-IN')} available`);
         }
         const toDist = distributors.find(d => d.$id === transferTo);
         if (!toDist) return toast.error('Target distributor not found');
@@ -162,7 +162,7 @@ export default function DistributorsPage() {
                     amount: amt,
                     currency: 'INR',
                     date: new Date().toISOString().split('T')[0],
-                    notes: `Transferred ₹${amt.toLocaleString('en-IN')} from ${transferFrom.name} to ${toDist.name}`,
+                    notes: `Transferred ₹${(amt || 0).toLocaleString('en-IN')} from ${transferFrom.name} to ${toDist.name}`,
                 }),
                 dbService.createExpense({
                     title: `Transfer In — ${transferFrom.name} → ${toDist.name}`,
@@ -171,7 +171,7 @@ export default function DistributorsPage() {
                     amount: amt,
                     currency: 'INR',
                     date: new Date().toISOString().split('T')[0],
-                    notes: `Received ₹${amt.toLocaleString('en-IN')} from ${transferFrom.name}`,
+                    notes: `Received ₹${(amt || 0).toLocaleString('en-IN')} from ${transferFrom.name}`,
                 }),
             ]);
 
@@ -197,7 +197,7 @@ export default function DistributorsPage() {
                 })
             ]);
 
-            toast.success(`✅ ₹${amt.toLocaleString('en-IN')} transferred from ${transferFrom.name} to ${toDist.name}`);
+            toast.success(`✅ ₹${(amt || 0).toLocaleString('en-IN')} transferred from ${transferFrom.name} to ${toDist.name}`);
             setTransferModal(false);
             fetchAll();
         } catch (err) {
@@ -311,7 +311,7 @@ export default function DistributorsPage() {
                                              </td>
                                              <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{dist.phone || '—'}</td>
                                              <td className="hide-sm">{distTxs.length} txs</td>
-                                             <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{totalINR.toLocaleString('en-IN')}</td>
+                                             <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{(totalINR || 0).toLocaleString('en-IN')}</td>
                                              <td style={{ fontWeight: 700, textAlign: 'right', color: dist.inr_balance >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
                                                  {dist.inr_balance < 0 ? '-' : ''}₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
                                              </td>
@@ -434,13 +434,13 @@ export default function DistributorsPage() {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                                         <span style={{ color: 'var(--text-muted)' }}>Available INR (Not Given):</span>
                                         <span style={{ fontWeight: 800, color: availableINR > 0 ? '#a78bfa' : 'var(--status-failed)' }}>
-                                            ₹{availableINR.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                            ₹{(availableINR || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                         <span style={{ color: 'var(--text-muted)' }}>Current Balance ({editItem.name}):</span>
                                         <span style={{ fontWeight: 700, color: 'var(--brand-accent)' }}>
-                                            ₹{Number(editItem.inr_balance || 0).toLocaleString('en-IN')}
+                                            ₹{(Number(editItem.inr_balance) || 0).toLocaleString('en-IN')}
                                         </span>
                                     </div>
                                 </div>
@@ -451,7 +451,7 @@ export default function DistributorsPage() {
                                         value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
                                     {depositAmount && Number(depositAmount) > availableINR && (
                                         <div style={{ color: 'var(--status-failed)', fontSize: 12, marginTop: 6 }}>
-                                            ⚠ Amount exceeds available INR (₹{availableINR.toLocaleString('en-IN')})
+                                            ⚠️ Amount exceeds available INR (₹{(availableINR || 0).toLocaleString('en-IN')})
                                         </div>
                                     )}
                                 </div>
@@ -488,7 +488,7 @@ export default function DistributorsPage() {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>From: <strong style={{ color: 'var(--text-primary)' }}>{transferFrom.name}</strong></span>
                                         <span style={{ fontSize: 20, fontWeight: 800, color: '#a78bfa' }}>
-                                            ₹{round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')}
+                                            ₹{(round2(transferFrom.inr_balance) || 0).toLocaleString('en-IN')}
                                         </span>
                                     </div>
                                 </div>
@@ -502,7 +502,7 @@ export default function DistributorsPage() {
                                             .filter(d => d.$id !== transferFrom.$id)
                                             .map(d => (
                                                 <option key={d.$id} value={d.$id}>
-                                                    {d.name} (Bal: ₹{round2(d.inr_balance || 0).toLocaleString('en-IN')})
+                                                    {d.name} (Bal: ₹{(round2(d.inr_balance) || 0).toLocaleString('en-IN')})
                                                 </option>
                                             ))
                                         }
@@ -519,19 +519,19 @@ export default function DistributorsPage() {
                                         max={round2(transferFrom.inr_balance || 0)}
                                         required
                                         autoFocus
-                                        placeholder={`Max ₹${round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')}`}
+                                        placeholder={`Max ₹${(round2(transferFrom.inr_balance) || 0).toLocaleString('en-IN')}`}
                                         value={transferAmount}
                                         onChange={e => setTransferAmount(e.target.value)}
                                         style={{ fontSize: 20, fontWeight: 700, height: 52 }}
                                     />
                                     {transferAmount && parseFloat(transferAmount) > 0 && parseFloat(transferAmount) <= round2(transferFrom.inr_balance || 0) && (
                                         <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 6 }}>
-                                            ✓ {transferFrom.name} remaining: <strong>₹{round2(round2(transferFrom.inr_balance || 0) - parseFloat(transferAmount)).toLocaleString('en-IN')}</strong>
+                                            ✓ {transferFrom.name} remaining: <strong>₹{(round2(round2(transferFrom.inr_balance || 0) - parseFloat(transferAmount)) || 0).toLocaleString('en-IN')}</strong>
                                         </div>
                                     )}
                                     {transferAmount && parseFloat(transferAmount) > round2(transferFrom.inr_balance || 0) && (
                                         <div style={{ fontSize: 12, color: 'var(--status-failed)', marginTop: 6 }}>
-                                            ⚠️ Exceeds available balance (₹{round2(transferFrom.inr_balance || 0).toLocaleString('en-IN')})
+                                            ⚠️ Exceeds available balance (₹{(round2(transferFrom.inr_balance) || 0).toLocaleString('en-IN')})
                                         </div>
                                     )}
                                 </div>

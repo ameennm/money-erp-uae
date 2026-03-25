@@ -149,6 +149,7 @@ export default function ConversionAgentsPage() {
                 currency: balCur,
                 date: new Date().toISOString().split('T')[0],
                 notes: depositNote || `Deposited ${amtIn} ${balCur}.`,
+                distributor_id: activeAgent.$id,
                 distributor_name: activeAgent.name
             };
             const createdExpense = await dbService.createExpense(expensePayload);
@@ -158,7 +159,7 @@ export default function ConversionAgentsPage() {
                 agent: activeAgent,
                 amount: amtIn,
                 currency: balCur,
-                type: 'deposit',
+                type: 'credit',
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Deposit to conversion agent: ${activeAgent.name}`
@@ -202,7 +203,8 @@ export default function ConversionAgentsPage() {
                 amount: targetAmt,
                 currency: incomeCur,
                 date: new Date().toISOString().split('T')[0],
-                notes: `Received ${targetAmt.toLocaleString()} ${incomeCur} (Sourced from ${amtSource} ${balCur} @ ${rate}) from conversion agent`,
+                notes: `Received ${(targetAmt || 0).toLocaleString()} ${incomeCur} (Sourced from ${(amtSource || 0).toLocaleString()} ${balCur} @ ${rate}) from conversion agent`,
+                distributor_id: activeAgent.$id,
                 distributor_name: activeAgent.name
             };
             const createdExpense = await dbService.createExpense(expensePayload);
@@ -212,13 +214,13 @@ export default function ConversionAgentsPage() {
                 agent: activeAgent,
                 amount: -amtSource, // Negative because we are receiving funds back from them (settling their "deposit")
                 currency: balCur,
-                type: 'payment',
+                type: 'debit',
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Receipt from conversion agent: ${activeAgent.name}`
             });
 
-            toast.success(`Received ${targetAmt.toLocaleString()} ${incomeCur}`);
+            toast.success(`Received ${(targetAmt || 0).toLocaleString()} ${incomeCur}`);
             setReceiveModal(false);
             fetchAll();
         } catch (err) {
@@ -226,191 +228,7 @@ export default function ConversionAgentsPage() {
         } finally {
             setSaving(false);
         }
-    };
-
-    const handleEditRecord = (r) => {
-        setEditingRecord(r);
-        let amount = 0;
-        if (r.record_type === 'tx_sar_aed') amount = r.collected_amount;
-        else if (r.record_type === 'bulk_sar_aed') amount = r.sar_amount;
-        else if (r.record_type === 'bulk_aed_inr') amount = r.aed_amount;
-        else if (r.record_type === 'deposit') amount = r.amount;
-        else if (r.record_type === 'receipt') {
-            const match = r.notes?.match(/Sourced from ([\d,.]+) /);
-            amount = match ? Number(match[1].replace(/,/g, '')) : r.amount;
-        }
-
-        setEditRecordForm({
-            amount: amount,
-            rate: r.rate || '',
-            notes: r.notes || r.client_name || ''
-        });
-        setEditRecordModal(true);
-    };
-
-    const handleUpdateRecord = async (e) => {
-        e.preventDefault();
-        setSaving(true);
-        try {
-            const r = editingRecord;
-            const newAmt = Number(editRecordForm.amount);
-            const newRate = Number(editRecordForm.rate);
-            const newNotes = editRecordForm.notes;
-
-            if (r.record_type === 'tx_sar_aed') {
-                const oldAmt = Number(r.collected_amount);
-                const oldRate = Number(r.rate);
-                const diff = newAmt - oldAmt;
-                
-                // Recalculate profit if applicable
-                const aedToInr = Number(r.aed_to_inr_rate) || 0;
-                const inrDist = Number(r.actual_inr_distributed) || 0;
-                let profitAed = 0;
-                if (aedToInr > 0) {
-                    const actualAedValue = newAmt / newRate;
-                    const aedCostOfInr = (inrDist / 1000) * aedToInr;
-                    profitAed = Number((actualAedValue - aedCostOfInr).toFixed(2));
-                }
-
-                // Update transaction
-                const updatedFields = {
-                    collected_amount: newAmt,
-                    sar_to_aed_rate: newRate,
-                    actual_aed: newAmt / newRate,
-                    notes: newNotes,
-                    ...(profitAed !== 0 ? { profit_aed: profitAed } : {})
-                };
-                await dbService.updateTransaction(r.$id, updatedFields);
-                
-                // Update Agent balance (Conversion Agent)
-                const agent = agents.find(a => a.$id === r.conversion_agent_id);
-                if (agent && diff !== 0) {
-                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + diff });
-                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) + diff } : a));
-                }
-
-                // Update Collection Agent balance
-                const colAgentId = r.collection_agent_id;
-                if (colAgentId && diff !== 0) {
-                    const colAgent = agents.find(a => a.$id === colAgentId);
-                    if (colAgent) {
-                        const colBalField = r.collected_currency === 'AED' ? 'aed_balance' : 'sar_balance';
-                        await dbService.updateAgent(colAgent.$id, { [colBalField]: Math.max(0, (Number(colAgent[colBalField]) || 0) + diff) });
-                        setAgents(prev => prev.map(a => a.$id === colAgent.$id ? { ...a, [colBalField]: Math.max(0, (Number(a[colBalField]) || 0) + diff) } : a));
-                    }
-                }
-                setTxs(prev => prev.map(t => t.$id === r.$id ? { ...t, ...updatedFields } : t));
-
-            } else if (r.record_type === 'deposit') {
-                const oldAmt = Number(r.amount);
-                const diff = newAmt - oldAmt;
-                await dbService.updateExpense(r.$id, { amount: newAmt, notes: newNotes });
-                
-                const agent = agents.find(a => a.name === r.distributor_name);
-                if (agent && diff !== 0) {
-                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + diff });
-                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) + diff } : a));
-                }
-                setExpenseRecs(prev => prev.map(ex => ex.$id === r.$id ? { ...ex, amount: newAmt, notes: newNotes } : ex));
-
-            } else if (r.record_type === 'receipt') {
-                const oldMatch = r.notes?.match(/Sourced from ([\d,.]+) /);
-                const oldSourceAmt = oldMatch ? Number(oldMatch[1].replace(/,/g, '')) : 0;
-                const diff = newAmt - oldSourceAmt;
-
-                let incomeCur = r.currency;
-                let targetAmt = 0;
-                if (viewingAgent.type === 'conversion_sar') {
-                    targetAmt = newAmt / newRate;
-                } else {
-                    targetAmt = newAmt * newRate;
-                }
-
-                const updatedNotes = `Received ${targetAmt.toLocaleString()} ${incomeCur} (Sourced from ${newAmt} @ ${newRate}) from conversion agent`;
-                await dbService.updateExpense(r.$id, { amount: targetAmt, notes: updatedNotes });
-
-                const agent = agents.find(a => a.name === r.distributor_name);
-                if (agent && diff !== 0) {
-                    const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                    await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) - diff });
-                    setAgents(prev => prev.map(a => a.$id === agent.$id ? { ...a, [balField]: (Number(a[balField]) || 0) - diff } : a));
-                }
-                setExpenseRecs(prev => prev.map(ex => ex.$id === r.$id ? { ...ex, amount: targetAmt, notes: updatedNotes } : ex));
-            } else {
-                 toast.error('Bulk record editing not yet implemented');
-                 setSaving(false);
-                 return;
-            }
-
-            toast.success('Record updated');
-            setEditRecordModal(false);
-        } catch (err) {
-            toast.error(err.message);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleDeleteRecord = async (e, r) => {
-        e.stopPropagation();
-        if (!window.confirm('Delete this record? This cannot be undone.')) return;
-
-        try {
-            setSaving(true);
-            if (r.record_type === 'tx_sar_aed') {
-                toast.error('To delete a transaction, please go to the Transactions page.');
-                setSaving(false);
-                return;
-            } else if (r.record_type === 'bulk_sar_aed') {
-                await dbService.deleteAedConversion(r.$id);
-            } else if (r.record_type === 'bulk_aed_inr') {
-                await dbService.deleteExpense(r.$id);
-                if (r.inr_expense_id) await dbService.deleteExpense(r.inr_expense_id);
-            } else if (r.record_type === 'deposit' || r.record_type === 'receipt') {
-                const agent = agents.find(a => a.name === r.distributor_name);
-                if (agent) {
-                    let undoBal = 0;
-                    if (r.record_type === 'deposit') {
-                        undoBal = -Number(r.amount);
-                    } else {
-                        // Undo receipt: Add back the source amount to agent balance
-                        const match = r.notes?.match(/Sourced from ([\d,.]+) /);
-                        if (match) {
-                            undoBal = Number(match[1].replace(/,/g, ''));
-                        } else {
-                            // fallback
-                            const rateMatch = r.notes?.match(/@ ([\d,.]+)\)/);
-                            const rate = rateMatch ? Number(rateMatch[1].replace(/,/g, '')) : 1;
-                            if (agent.type === 'conversion_sar') {
-                                undoBal = Number(r.amount) * rate;
-                            } else {
-                                undoBal = Number(r.amount) / rate;
-                            }
-                        }
-                    }
-                    if (undoBal !== 0 && undoBal && !isNaN(undoBal)) {
-                        const balField = agent.type === 'conversion_sar' ? 'sar_balance' : 'aed_balance';
-                        await dbService.updateAgent(agent.$id, { [balField]: (Number(agent[balField]) || 0) + undoBal });
-                    }
-                }
-                await dbService.deleteExpense(r.$id);
-            }
-            toast.success('Record deleted');
-            // Optimistic: remove deleted records from state
-            if (r.record_type === 'bulk_sar_aed') {
-                setConvRecs(prev => prev.filter(cr => cr.$id !== r.$id));
-            } else {
-                setExpenseRecs(prev => prev.filter(e => e.$id !== r.$id && e.$id !== r.inr_expense_id));
-            }
-        } catch (err) {
-            toast.error(err.message);
-        } finally {
-            setSaving(false);
-        }
-    };
-
+}
     return (
         <Layout title="Conversion Agents">
             <div style={{ marginBottom: 16 }}>
@@ -531,7 +349,7 @@ export default function ConversionAgentsPage() {
                                             </td>
                                             <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
                                             <td style={{ textAlign: 'right', fontWeight: 700, color: bal >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                                {bal.toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
+                                                {(bal || 0).toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
@@ -554,7 +372,7 @@ export default function ConversionAgentsPage() {
                                 <tr>
                                     <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
                                     <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        {agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0)), 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'SAR' : 'AED'}</span>
+                                        {(agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0)), 0) || 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'SAR' : 'AED'}</span>
                                     </td>
                                     <td colSpan={2}></td>
                                 </tr>
@@ -720,7 +538,7 @@ export default function ConversionAgentsPage() {
                             </div>
                             {actionAmount && actionRate && (
                                 <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
-                                    Result: {activeAgent.type === 'conversion_sar' ? (Number(actionAmount) / Number(actionRate)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (Number(actionAmount) * Number(actionRate)).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be recorded as income.
+                                    Result: {activeAgent.type === 'conversion_sar' ? (Number(actionAmount) / Number(actionRate)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (Number(actionAmount) * Number(actionRate) || 0).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be recorded as income.
                                 </div>
                             )}
                             <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
