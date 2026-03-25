@@ -67,22 +67,33 @@ const crud = (path, table, getSort = 'createdAt DESC') => {
         return c.json({ $id: id, $createdAt: getNow(), $updatedAt: getNow(), ...body })
     })
 
+    const VALID_COLUMNS = {
+        transactions: ['tx_id', 'creator_id', 'creator_name', 'status', 'client_name', 'inr_requested', 'collected_currency', 'collected_amount', 'collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed', 'notes', 'collection_agent_id', 'collection_agent_name', 'conversion_agent_id', 'conversion_agent_name', 'distributor_id', 'distributor_name', 'profit_inr', 'edit_pending_approval'],
+        agents: ['name', 'phone', 'location', 'type', 'currency', 'notes', 'inr_balance', 'sar_balance', 'aed_balance'],
+        employees: ['name', 'email', 'role', 'notes'],
+        expenses: ['title', 'category', 'amount', 'currency', 'date', 'notes', 'type', 'distributor_id', 'distributor_name'],
+        credits: ['from_person', 'reason', 'amount_sar', 'date', 'admin_approved'],
+        aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date'],
+    };
+
     app.put(`/${path}/:id`, async (c) => {
-        const id = c.req.param('id')
-        const body = await c.req.json()
+        const id = c.req.param('id');
+        let body = await c.req.json();
+        const validCols = VALID_COLUMNS[table] || [];
+        const updates = Object.keys(body)
+            .filter(key => validCols.includes(key))
+            .map(key => `${key} = ?`)
+            .join(', ');
 
-        delete body.$id; delete body.$createdAt; delete body.$updatedAt;
+        if (!updates) return c.json({ success: true, message: 'No valid columns to update' });
 
-        const keys = ['updatedAt', ...Object.keys(body)]
-        const values = [getNow(), ...Object.values(body)]
+        const values = Object.keys(body)
+            .filter(key => validCols.includes(key))
+            .map(key => body[key]);
 
-        const sets = keys.map(k => `${k} = ?`).join(',')
-
-        await c.env.DB.prepare(`UPDATE ${table} SET ${sets} WHERE id = ?`)
-            .bind(...values, id).run()
-
-        return c.json({ $id: id, $updatedAt: getNow(), ...body })
-    })
+        await c.env.DB.prepare(`UPDATE ${table} SET ${updates} WHERE id = ?`).bind(...values, id).run();
+        return c.json({ success: true });
+    });
 
     app.delete(`/${path}/:id`, async (c) => {
         const id = c.req.param('id')

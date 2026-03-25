@@ -42,6 +42,7 @@ export default function DistributorsPage() {
     const [form, setForm] = useState(EMPTY);
     const [depositModal, setDepositModal] = useState(false);
     const [depositAmount, setDepositAmount] = useState('');
+    const [depositNote, setDepositNote] = useState('');
     const [transferModal, setTransferModal] = useState(false);
     const [transferFrom, setTransferFrom] = useState(null);
     const [transferTo, setTransferTo] = useState('');
@@ -76,7 +77,7 @@ export default function DistributorsPage() {
     const getDistTxs = (distId) => txs.filter(t => t.distributor_id === distId && t.status === 'completed');
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
-    const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositModal(true); };
+    const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositNote(''); setDepositModal(true); };
     const openTransfer = (d) => { setTransferFrom(d); setTransferTo(''); setTransferAmount(''); setTransferModal(true); };
 
     const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
@@ -114,14 +115,16 @@ export default function DistributorsPage() {
                 amount: round2(amt),
                 currency: 'INR',
                 date: new Date().toISOString().split('T')[0],
-                notes: `Deposited ₹${amt.toLocaleString('en-IN')} to ${editItem.name}`
+                notes: depositNote || `Deposited ₹${amt.toLocaleString('en-IN')} to ${editItem.name}`,
+                distributor_id: editItem.$id,
+                distributor_name: editItem.name
             });
 
             toast.success(`₹${amt.toLocaleString('en-IN')} deposited to ${editItem.name}`);
             setDepositModal(false);
             // Optimistic: update distributor balance and add expense record
             setDistributors(prev => prev.map(d => d.$id === editItem.$id ? { ...d, inr_balance: newBal } : d));
-            setExpenseRecs(prev => [{ type: 'expense', category: 'Distributor Deposit', amount: round2(amt), currency: 'INR' }, ...prev]);
+            setExpenseRecs(prev => [{ type: 'expense', category: 'Distributor Deposit', amount: round2(amt), currency: 'INR', notes: depositNote }, ...prev]);
         } catch (e) { toast.error('Deposit failed: ' + e.message); }
         finally { setSaving(false); }
     };

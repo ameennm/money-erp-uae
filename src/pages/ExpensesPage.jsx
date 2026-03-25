@@ -58,22 +58,12 @@ export default function ExpensesPage() {
                 ...form,
                 amount: parseFloat(form.amount) || 0,
             };
-            // If an agent is selected, set id and name
-            if (form.agent_id) {
-                const agent = agents.find(a => a.$id === form.agent_id);
-                payload.distributor_id = form.agent_id;
-                payload.distributor_name = agent ? agent.name : '';
-            } else {
-                payload.distributor_id = '';
-                payload.distributor_name = '';
-            }
-            // Remove agent_id from payload since we map it to distributor_id for db backwards compatibility
-            delete payload.agent_id;
+            const selectedAgent = agents.find(a => a.$id === form.distributor_id);
+            payload.distributor_name = selectedAgent ? selectedAgent.name : '';
             const created = await dbService.createExpense(payload);
             toast.success('Record saved');
             setModal(false);
             setForm(EMPTY);
-            // Optimistic: prepend new record to state
             setExpenses(prev => [{ ...created, ...payload }, ...prev]);
         } catch (e) {
             toast.error(e.message);
@@ -87,7 +77,6 @@ export default function ExpensesPage() {
         try {
             await dbService.deleteExpense(id);
             toast.success('Deleted');
-            // Optimistic: remove from state
             setExpenses(prev => prev.filter(e => e.$id !== id));
         } catch (e) {
             toast.error(e.message);
@@ -112,11 +101,22 @@ export default function ExpensesPage() {
         XLSX.writeFile(wb, `income_ops_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     };
 
+    const getAvailableAgents = () => {
+        if (form.currency === 'AED') {
+            return agents.filter(a => (a.type === 'collection' && a.currency === 'AED') || a.type === 'conversion_aed');
+        }
+        if (form.currency === 'SAR') {
+            return agents.filter(a => (a.type === 'collection' && a.currency === 'SAR') || a.type === 'conversion_sar');
+        }
+        if (form.currency === 'INR') {
+            return agents.filter(a => a.type === 'distributor');
+        }
+        return [];
+    };
+
     return (
         <Layout title="Income &amp; Ops">
-            {/* Summary */}
             <div className="stats-grid mb-6">
-                {/* Income by currency */}
                 <div className="stat-card" style={{ '--accent-bar': 'var(--brand-accent)' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(0,200,150,0.15)', '--icon-color': 'var(--brand-accent)' }}>
                         <TrendingUp size={20} />
@@ -130,7 +130,6 @@ export default function ExpensesPage() {
                     </div>
                 </div>
 
-                {/* Expenses by currency */}
                 <div className="stat-card" style={{ '--accent-bar': 'var(--status-failed)' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(255,84,112,0.15)', '--icon-color': 'var(--status-failed)' }}>
                         <TrendingDown size={20} />
@@ -144,7 +143,6 @@ export default function ExpensesPage() {
                     </div>
                 </div>
 
-                {/* Record count */}
                 <div className="stat-card" style={{ '--accent-bar': '#4a9eff' }}>
                     <div className="stat-icon" style={{ '--icon-bg': 'rgba(74,158,255,0.15)', '--icon-color': '#4a9eff' }}>
                         <TrendingUp size={20} />
@@ -154,7 +152,6 @@ export default function ExpensesPage() {
                 </div>
             </div>
 
-            {/* Toolbar */}
             <div className="flex items-center justify-between mb-6" style={{ gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500 }}>
                     {filteredExpenses.length} record{filteredExpenses.length !== 1 ? 's' : ''}
@@ -199,7 +196,7 @@ export default function ExpensesPage() {
                                     <th>#</th>
                                     <th>Title</th>
                                     <th>Category</th>
-                                    <th>Related Agent</th>
+                                    <th>Entity</th>
                                     <th>Amount</th>
                                     <th>Currency</th>
                                     <th>Date</th>
@@ -246,7 +243,6 @@ export default function ExpensesPage() {
                 </div>
             )}
 
-            {/* Modal */}
             {modal && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(false)}>
                     <div className="modal">
@@ -279,7 +275,7 @@ export default function ExpensesPage() {
                                     <div className="form-group">
                                         <label className="form-label">Currency</label>
                                         <select id="exp-currency" className="form-select"
-                                            value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+                                            value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value, distributor_id: '', distributor_name: '' })}>
                                             <option>AED</option>
                                             <option>SAR</option>
                                             <option>INR</option>
@@ -287,36 +283,22 @@ export default function ExpensesPage() {
                                     </div>
                                 </div>
 
-                                {/* Agent dropdown (maps to distributor in DB) */}
                                 <div className="form-group">
-                                    <label className="form-label">Assign to Agent/Distributor (Optional)</label>
+                                    <label className="form-label">
+                                        {form.currency === 'INR' ? 'Distributor' : 'Agent / Conversion Agent'}
+                                    </label>
                                     <select
                                         className="form-select"
-                                        value={form.agent_id}
-                                        onChange={e => setForm({ ...form, agent_id: e.target.value })}
+                                        value={form.distributor_id}
+                                        onChange={e => setForm({ ...form, distributor_id: e.target.value })}
                                     >
-                                        <option value="">— Select Agent / Distributor —</option>
-                                        <optgroup label="Distributors">
-                                            {agents.filter(d => d.type === 'distributor').map(d => (
-                                                <option key={d.$id} value={d.$id}>{d.name}</option>
-                                            ))}
-                                        </optgroup>
-                                        <optgroup label="Conversion Agents">
-                                            {agents.filter(a => a.type.startsWith('conversion')).map(d => (
-                                                <option key={d.$id} value={d.$id}>{d.name}</option>
-                                            ))}
-                                        </optgroup>
-                                        <optgroup label="Collection Agents">
-                                            {agents.filter(a => a.type.startsWith('collection')).map(d => (
-                                                <option key={d.$id} value={d.$id}>{d.name}</option>
-                                            ))}
-                                        </optgroup>
+                                        <option value="">— Select {form.currency === 'INR' ? 'Distributor' : 'Agent'} —</option>
+                                        {getAvailableAgents().map(a => (
+                                            <option key={a.$id} value={a.$id}>
+                                                {a.name} ({a.type.replace('_', ' ')})
+                                            </option>
+                                        ))}
                                     </select>
-                                    {form.category === 'Commission' && form.type === 'expense' && form.agent_id && agents.find(a => a.$id === form.agent_id)?.type === 'distributor' && (
-                                        <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 4 }}>
-                                            ✓ This commission will appear in {agents.find(d => d.$id === form.agent_id)?.name}'s ledger
-                                        </div>
-                                    )}
                                 </div>
 
                                 <div className="form-row">

@@ -67,6 +67,7 @@ export default function ConversionAgentsPage() {
     const [activeAgent, setActiveAgent] = useState(null);
     const [actionAmount, setActionAmount] = useState('');
     const [actionRate, setActionRate] = useState('');
+    const [depositNote, setDepositNote] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [user, setUser] = useState(null);
 
@@ -378,7 +379,7 @@ export default function ConversionAgentsPage() {
                     amount: amtIn,
                     currency: expenseCur,
                     date: new Date().toISOString().split('T')[0],
-                    notes: `Deposited ${amtIn} ${expenseCur}.`,
+                    notes: depositNote || `Deposited ${amtIn} ${expenseCur}.`,
                     distributor_name: activeAgent.name
                 })
             ]);
@@ -765,7 +766,7 @@ export default function ConversionAgentsPage() {
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate('1'); setDepositModal(true); }}>Deposit</button>
+                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Deposit</button>
                                                     <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Receive</button>
                                                 </div>
                                             </td>
@@ -1077,6 +1078,11 @@ export default function ConversionAgentsPage() {
                                 </div>
                                 <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 13, color: '#4a9eff' }}>
                                     Money will stay in <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> until you receive converted funds from the agent.
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Notes</label>
+                                    <textarea className="form-textarea" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} rows="3" placeholder="Additional details..."
+                                        value={depositNote} onChange={e => setDepositNote(e.target.value)} />
                                 </div>
                                 <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                                     <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
