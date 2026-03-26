@@ -151,6 +151,11 @@ export default function TransactionsPage() {
     const handleSave = async (e) => {
         e.preventDefault();
         if (isSavingRef.current) return;
+
+        if (!form.client_name || !form.inr_requested || !form.collection_agent_id || !form.collection_rate || !form.collected_amount || !form.distributor_id) {
+            return toast.error('Please fill all required fields');
+        }
+
         isSavingRef.current = true;
         setSaving(true);
         try {
@@ -638,7 +643,7 @@ export default function TransactionsPage() {
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Collection Agent</label>
-                                        <select className="form-select" value={form.collection_agent_id}
+                                        <select className="form-select" required value={form.collection_agent_id}
                                             onChange={e => {
                                                 const a = agents.find(x => x.$id === e.target.value);
                                                 setForm({
