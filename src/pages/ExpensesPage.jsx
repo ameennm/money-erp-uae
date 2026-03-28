@@ -13,7 +13,7 @@ const EXPENSE_CATEGORIES = [
 ];
 const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Agent Payment', 'Other Income'];
 
-const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', agent_id: '' };
+const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', distributor_id: '', distributor_name: '' };
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
