@@ -4,6 +4,8 @@ import { X, Download, FileSpreadsheet, TrendingUp, TrendingDown, Wallet } from '
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
+import { SearchInput, DateRangeFilter, CurrencyFilter, FilterBar } from './filters';
+import { applyDateRange, createSearchMatcher } from '../utils/filterHelpers';
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
@@ -58,6 +60,9 @@ export default function LedgerModal({ agent, onClose }) {
     const [entries, setEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [currencyFilter, setCurrencyFilter] = useState('All');
+    const [search, setSearch] = useState('');
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
+    
     const type = agent?.type || 'collection';
 
     const cfg = LABEL_CONFIG[type] || LABEL_CONFIG.collection;
@@ -97,15 +102,46 @@ export default function LedgerModal({ agent, onClose }) {
         }));
     }, [entries]);
 
-    const filtered = allEntries.filter(r => currencyFilter === 'All' || r.currency === currencyFilter);
+    // Calculate chronological absolute running balance for all entries BEFORE visual filtering
+    const allEntriesWithBalance = useMemo(() => {
+        const sorted = [...allEntries].sort((a, b) => new Date(a._date) - new Date(b._date));
+        const runningBal = { SAR: 0, AED: 0, INR: 0 };
+        return sorted.map(entry => {
+            const cur = entry.currency;
+            if (cur && runningBal[cur] !== undefined) {
+                runningBal[cur] += Number(entry.debit || 0) - Number(entry.credit || 0);
+                if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
+            }
+            return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
+        }).reverse(); // Latest first for display
+    }, [allEntries]);
 
-    // Totals per currency
+    // Apply Filters (Currency, Date Range, Search)
+    const filtered = useMemo(() => {
+        let result = allEntriesWithBalance;
+
+        // Apply Date Range
+        result = applyDateRange(result, dateRange.range, dateRange.customFrom, dateRange.customTo, '_date');
+
+        // Apply Currency Filter
+        if (currencyFilter !== 'All') {
+            result = result.filter(r => r.currency === currencyFilter);
+        }
+
+        // Apply Search Matcher
+        const searchMatcher = createSearchMatcher(['particular', 'reference_type']);
+        result = result.filter(r => searchMatcher(r, search));
+
+        return result;
+    }, [allEntriesWithBalance, dateRange, currencyFilter, search]);
+
+    // Totals per currency calculated ONLY from visually active/filtered transactions
     const allCurrencies = ['SAR', 'AED', 'INR'];
     const displayCurrencies = currencyFilter === 'All' ? allCurrencies : [currencyFilter];
 
     const totals = {};
     allCurrencies.forEach(cur => {
-        const curEntries = allEntries.filter(e => e.currency === cur);
+        const curEntries = filtered.filter(e => e.currency === cur);
         const totalDebit = curEntries.reduce((a, e) => a + Number(e.debit || 0), 0);
         const totalCredit = curEntries.reduce((a, e) => a + Number(e.credit || 0), 0);
         let bal = totalDebit - totalCredit;
@@ -113,21 +149,21 @@ export default function LedgerModal({ agent, onClose }) {
         totals[cur] = { debit: totalDebit, credit: totalCredit, balance: bal };
     });
 
-    // Running balance calculation (ascending, then reverse for display)
-    const sortedEntries = [...filtered].sort((a, b) => new Date(a._date) - new Date(b._date));
-    const runningBal = { SAR: 0, AED: 0, INR: 0 };
-    const entriesWithBalance = sortedEntries.map(entry => {
-        const cur = entry.currency;
-        if (cur && runningBal[cur] !== undefined) {
-            runningBal[cur] += Number(entry.debit || 0) - Number(entry.credit || 0);
-            if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
-        }
-        return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
-    }).reverse();
+    const activeFilterCount = [
+        search,
+        currencyFilter !== 'All',
+        dateRange.range !== 'All Time'
+    ].filter(Boolean).length;
+
+    const resetFilters = () => {
+        setSearch('');
+        setCurrencyFilter('All');
+        setDateRange({ range: 'All Time', customFrom: '', customTo: '' });
+    };
 
     const exportToExcel = () => {
-        const rows = entriesWithBalance.map((r, i) => ({
-            '#': entriesWithBalance.length - i,
+        const rows = filtered.map((r, i) => ({
+            '#': filtered.length - i,
             'Date': r._date ? format(new Date(r._date), 'dd-MM-yyyy HH:mm') : '',
             'Particular': r.particular,
             'Type': r._type.toUpperCase(),
@@ -240,38 +276,26 @@ export default function LedgerModal({ agent, onClose }) {
                                 </div>
                             </div>
 
-                            {/* ── Currency Filter ── */}
-                            <div className="flex items-center justify-between mb-4">
-                                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>
-                                    All Transactions
-                                </span>
-                                <div className="flex gap-1" style={{ background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 8 }}>
-                                    {['All', 'SAR', 'AED', 'INR'].map(c => (
-                                        <button
-                                            key={c}
-                                            onClick={() => setCurrencyFilter(c)}
-                                            style={{
-                                                padding: '6px 16px',
-                                                fontSize: 13,
-                                                fontWeight: currencyFilter === c ? 700 : 500,
-                                                borderRadius: 6,
-                                                border: 'none',
-                                                color: currencyFilter === c ? '#fff' : 'var(--text-muted)',
-                                                background: currencyFilter === c
-                                                    ? (c === 'SAR' ? '#4a9eff' : c === 'AED' ? 'var(--brand-gold)' : c === 'INR' ? '#a78bfa' : 'var(--brand-accent)')
-                                                    : 'transparent',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s'
-                                            }}
-                                        >
-                                            {c}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                            {/* ── Unified Filter Bar ── */}
+                            <FilterBar showClearAll onClearAll={resetFilters} activeFilterCount={activeFilterCount}>
+                                <SearchInput
+                                    value={search}
+                                    onChange={setSearch}
+                                    placeholder="Search details..."
+                                />
+                                <CurrencyFilter
+                                    value={currencyFilter}
+                                    onChange={setCurrencyFilter}
+                                    currencies={['All', 'SAR', 'AED', 'INR']}
+                                />
+                                <DateRangeFilter
+                                    value={dateRange}
+                                    onChange={setDateRange}
+                                />
+                            </FilterBar>
 
                             {/* ── Transaction List ── */}
-                            {entriesWithBalance.length === 0 ? (
+                            {filtered.length === 0 ? (
                                 <div className="empty-state card" style={{ padding: 40 }}>
                                     <FileSpreadsheet size={40} />
                                     <p>No entries found.</p>
@@ -292,13 +316,13 @@ export default function LedgerModal({ agent, onClose }) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {entriesWithBalance.map((r, i) => {
+                                                {filtered.map((r, i) => {
                                                     const balCol = r.runningBalance >= 0 ? cfg.balanceColor : 'var(--status-failed)';
                                                     const curCol = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' }[r.currency] || 'var(--text-muted)';
                                                     return (
                                                         <tr key={r._id + i} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                             <td style={{ color: 'var(--text-muted)', fontSize: 11, padding: '12px' }}>
-                                                                {entriesWithBalance.length - i}
+                                                                {filtered.length - i}
                                                             </td>
                                                             <td style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
                                                                 {r._date ? format(new Date(r._date), 'dd MMM yy') : '—'}

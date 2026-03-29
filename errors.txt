@@ -1,0 +1,13 @@
+C:\Users\servi\Desktop\vs code\money-erp\money-erp-uae\src\components\Sidebar.jsx
+  Line 69: 'Icon' is defined but never used.
+C:\Users\servi\Desktop\vs code\money-erp\money-erp-uae\src\context\AuthContext.jsx
+  Line 47: Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+C:\Users\servi\Desktop\vs code\money-erp\money-erp-uae\src\pages\ConversionAgentsPage.jsx
+  Line 379: 'CONV_TYPES' is not defined.
+C:\Users\servi\Desktop\vs code\money-erp\money-erp-uae\src\pages\ReconciliationPage.jsx
+  Line 4: 'ledgerService' is defined but never used. Allowed unused vars must match /^[A-Z_]/u.
+  Line 6: 'toast' is defined but never used. Allowed unused vars must match /^[A-Z_]/u.
+  Line 94: 'e' is defined but never used.
+C:\Users\servi\Desktop\vs code\money-erp\money-erp-uae\src\pages\TransactionsPage.jsx
+  Line 91: 'calculateProfit' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u.
+  Line 404: 'profitCur' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u.

@@ -66,17 +66,20 @@ export default function Sidebar({ isOpen, onClose }) {
             {/* ── Nav ────────────────────────────────────────────── */}
             <nav className="sidebar-nav">
                 <div className="nav-section-title">Main Menu</div>
-                {links.map(({ label, path, icon: Icon }) => (
-                    <NavLink
-                        key={path}
-                        to={path}
-                        className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-                        onClick={onClose}
-                    >
-                        <Icon size={17} className="nav-icon" />
-                        <span>{label}</span>
-                    </NavLink>
-                ))}
+                {links.map((link) => {
+                    const Icon = link.icon;
+                    return (
+                        <NavLink
+                            key={link.path}
+                            to={link.path}
+                            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+                            onClick={onClose}
+                        >
+                            <Icon size={17} className="nav-icon" />
+                            <span>{link.label}</span>
+                        </NavLink>
+                    );
+                })}
             </nav>
 
             {/* ── Footer ─────────────────────────────────────────── */}

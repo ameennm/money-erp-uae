@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { dbService, authService } from '../lib/appwrite';
-import { ledgerService } from '../lib/ledgerService';
 import { RefreshCw, CheckCircle, AlertTriangle, Play, Database, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
 
 export default function ReconciliationPage() {
     const [loading, setLoading] = useState(false);
@@ -91,7 +89,7 @@ export default function ReconciliationPage() {
                     await dbService.deleteLedgerEntry(entry.$id);
                     deleted++;
                     if (deleted % 50 === 0) addLog(`Deleted ${deleted} entries...`, 'info');
-                } catch (e) {
+                } catch {
                     // ignore
                 }
             }

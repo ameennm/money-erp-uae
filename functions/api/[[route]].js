@@ -31,6 +31,16 @@ app.get('/auth/me', async (c) => {
     return c.json({ user: { $id: 'admin', email: 'admin@admin.com', name: 'Admin', role: 'admin' } })
 })
 
+const VALID_COLUMNS = {
+    transactions: ['tx_id', 'creator_id', 'creator_name', 'status', 'client_name', 'inr_requested', 'collected_currency', 'collected_amount', 'collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed', 'notes', 'collection_agent_id', 'collection_agent_name', 'conversion_agent_id', 'conversion_agent_name', 'distributor_id', 'distributor_name', 'profit_inr', 'edit_pending_approval'],
+    agents: ['name', 'phone', 'location', 'type', 'currency', 'notes', 'inr_balance', 'sar_balance', 'aed_balance'],
+    employees: ['name', 'email', 'role', 'notes'],
+    expenses: ['title', 'category', 'amount', 'currency', 'date', 'notes', 'type', 'distributor_id', 'distributor_name'],
+    credits: ['from_person', 'reason', 'amount_sar', 'date', 'admin_approved'],
+    aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date'],
+    ledger_entries: ['agent_id', 'agent_name', 'agent_type', 'amount', 'currency', 'type', 'reference_type', 'reference_id', 'description', 'running_balance'],
+};
+
 // REST wrapper
 const crud = (path, table, getSort = 'createdAt DESC') => {
     app.get(`/${path}`, async (c) => {
@@ -56,8 +66,14 @@ const crud = (path, table, getSort = 'createdAt DESC') => {
         // Remove Appwrite-specific internal props from body if any were sent
         delete body.$id; delete body.$createdAt; delete body.$updatedAt;
 
-        const keys = ['id', 'createdAt', 'updatedAt', ...Object.keys(body)]
-        const values = [id, getNow(), getNow(), ...Object.values(body)]
+        const validCols = VALID_COLUMNS[table] || [];
+        const safeBody = {};
+        Object.keys(body).forEach(key => {
+            if (validCols.includes(key)) safeBody[key] = body[key];
+        });
+
+        const keys = ['id', 'createdAt', 'updatedAt', ...Object.keys(safeBody)]
+        const values = [id, getNow(), getNow(), ...Object.values(safeBody)]
 
         const qMarks = keys.map(() => '?').join(',')
 
@@ -67,15 +83,7 @@ const crud = (path, table, getSort = 'createdAt DESC') => {
         return c.json({ $id: id, $createdAt: getNow(), $updatedAt: getNow(), ...body })
     })
 
-    const VALID_COLUMNS = {
-        transactions: ['tx_id', 'creator_id', 'creator_name', 'status', 'client_name', 'inr_requested', 'collected_currency', 'collected_amount', 'collection_rate', 'sar_to_aed_rate', 'actual_aed', 'aed_to_inr_rate', 'actual_inr_distributed', 'profit_aed', 'notes', 'collection_agent_id', 'collection_agent_name', 'conversion_agent_id', 'conversion_agent_name', 'distributor_id', 'distributor_name', 'profit_inr', 'edit_pending_approval'],
-        agents: ['name', 'phone', 'location', 'type', 'currency', 'notes', 'inr_balance', 'sar_balance', 'aed_balance'],
-        employees: ['name', 'email', 'role', 'notes'],
-        expenses: ['title', 'category', 'amount', 'currency', 'date', 'notes', 'type', 'distributor_id', 'distributor_name'],
-        credits: ['from_person', 'reason', 'amount_sar', 'date', 'admin_approved'],
-        aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date'],
-        ledger_entries: ['agent_id', 'agent_name', 'agent_type', 'amount', 'currency', 'type', 'reference_type', 'reference_id', 'description', 'running_balance'],
-    };
+
 
     app.put(`/${path}/:id`, async (c) => {
         const id = c.req.param('id');

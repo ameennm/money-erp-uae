@@ -10,8 +10,7 @@ export default function TypeFilter({
   value,
   onChange,
   options = [],
-  type = 'tabs',
-  multiSelect = false
+  type = 'tabs'
 }) {
   if (type === 'select') {
     return (

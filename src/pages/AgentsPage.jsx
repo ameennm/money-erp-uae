@@ -13,7 +13,6 @@ const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', t
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
     const [txs, setTxs] = useState([]);
-    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -29,14 +28,12 @@ export default function AgentsPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const [ar, tr, ex] = await Promise.all([
+            const [ar, tr] = await Promise.all([
                 dbService.listAgents(), // Fetch all agents for universal search
                 dbService.listTransactions(),
-                dbService.listExpenses(),
             ]);
             setAgents(ar.documents);
             setTxs(tr.documents);
-            setExpenseRecs(ex.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {

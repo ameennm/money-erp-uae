@@ -63,18 +63,12 @@ export default function TransactionsPage() {
     const [settings, setSettings] = useState({ min_sar_rate: 0, min_aed_rate: 0 });
     const [search, setSearch] = useState('');
     const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
-    const [loading, setLoading] = useState(true);
+    const [_loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [editTx, setEditTx] = useState(null);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
     const isSavingRef = useRef(false);
-    const [copiedId, setCopiedId] = useState(null);
-
-    // Context-specific Modals
-    const [convertModal, setConvertModal] = useState(false);
-    const [distributeModal, setDistributeModal] = useState(false);
-    const [activeTx, setActiveTx] = useState(null);
 
     const fetchAll = async () => {
         setLoading(true);
@@ -94,16 +88,7 @@ export default function TransactionsPage() {
     useEffect(() => { fetchAll(); }, []);
 
     // ── Calculations ──────────────────────────────────────────────────────────
-    const calculateProfit = (tx, sarToAed, aedToInr, distributedInr) => {
-        let aedValue = 0;
-        if (tx.collected_currency === 'AED') {
-            aedValue = tx.collected_amount;
-        } else {
-            aedValue = tx.collected_amount * (parseFloat(sarToAed) || 0);
-        }
-        const aedCostOfInr = ((parseFloat(distributedInr) || 0) / 1000) * (parseFloat(aedToInr) || 0);
-        return (aedValue - aedCostOfInr).toFixed(2);
-    };
+
 
     // Calculate INR profit from rate spread: (actual_rate - min_rate) / 1000 * inr_requested
     const calcProfitInr = (collectionRate, currency, inrRequested) => {
@@ -298,121 +283,10 @@ export default function TransactionsPage() {
         } catch (e) { toast.error('Approve failed: ' + e.message); }
     };
 
-    const handleConversion = async (e) => {
-        e.preventDefault();
-        if (isSavingRef.current) return;
-        if (!form.conversion_agent_id) return toast.error('Select a conversion agent');
-        isSavingRef.current = true;
-        setSaving(true);
-        try {
-            const sarRate = parseFloat(form.sar_to_aed_rate);
-            const updateData = {
-                sar_to_aed_rate: sarRate,
-                actual_aed: actualAed,
-                status: 'pending_distribution',
-                conversion_agent_id: form.conversion_agent_id,
-                conversion_agent_name: form.conversion_agent_name
-            };
-
-            await dbService.updateTransaction(activeTx.$id, updateData);
-
-            // ── Record ledger entry for conversion agent ──
-            const convAgent = agents.find(a => a.$id === form.conversion_agent_id);
-            if (convAgent) {
-                await ledgerService.recordEntry({
-                    agent: convAgent,
-                    amount: activeTx.collected_amount,
-                    currency: activeTx.collected_currency,
-                    type: 'debit', // Agent received SAR to convert
-                    reference_type: 'transaction',
-                    reference_id: activeTx.$id,
-                    description: `TX #${activeTx.tx_id} - Received for conversion from ${activeTx.client_name}`
-                });
-            }
-
-            toast.success('Conversion Logged');
-            setConvertModal(false);
-            fetchAll(); // Refresh everything
-        } catch (e) { toast.error(e.message); }
-        finally {
-            isSavingRef.current = false;
-            setSaving(false);
-        }
-    };
-
-    const handleDistribution = async (e) => {
-        e.preventDefault();
-        if (isSavingRef.current) return;
-        isSavingRef.current = true;
-        setSaving(true);
-        try {
-            const inrRate = parseFloat(form.aed_to_inr_rate);
-            const inrDist = round2(form.actual_inr_distributed);
-
-            // Calculate Profit in AED
-            const profit = calculateProfit(activeTx, activeTx.sar_to_aed_rate, inrRate, inrDist);
-
-            const diff = round2(inrDist - (activeTx.inr_requested || 0));
-            const dist = agents.find(a => a.$id === (form.distributor_id || activeTx.distributor_id));
-
-            if (dist && diff !== 0) {
-                await ledgerService.recordEntry({
-                    agent: dist,
-                    amount: Math.abs(diff),
-                    currency: 'INR',
-                    type: diff > 0 ? 'credit' : 'debit', // If actual > requested, agent gave more (Credit)
-                    reference_type: 'transaction',
-                    reference_id: activeTx.$id,
-                    description: `TX #${activeTx.tx_id} - INR Adjustment (Orig: ${activeTx.inr_requested}, Actual: ${inrDist})`
-                });
-            }
-
-            await dbService.updateTransaction(activeTx.$id, {
-                aed_to_inr_rate: inrRate,
-                actual_inr_distributed: inrDist,
-                profit_aed: parseFloat(profit),
-                status: 'completed',
-                distributor_id: form.distributor_id || activeTx.distributor_id,
-                distributor_name: form.distributor_name || activeTx.distributor_name
-            });
-
-            toast.success('Distribution Complete');
-            setDistributeModal(false);
-            fetchAll(); // Refresh everything
-        } catch (e) { toast.error(e.message); }
-        finally {
-            isSavingRef.current = false;
-            setSaving(false);
-        }
-    };
-
     const openEdit = (tx) => {
         setEditTx(tx);
         setForm({ ...tx });
         setModal(true);
-    };
-
-    const openConvert = (tx) => {
-        setActiveTx(tx);
-        setForm({
-            ...EMPTY,
-            sar_to_aed_rate: tx.sar_to_aed_rate || '',
-            conversion_agent_id: (isAdmin || isCollector) ? (tx.conversion_agent_id || '') : user.$id,
-            conversion_agent_name: (isAdmin || isCollector) ? (tx.conversion_agent_name || '') : user.name,
-        });
-        setConvertModal(true);
-    };
-
-    const openDistribute = (tx) => {
-        setActiveTx(tx);
-        setForm({
-            ...EMPTY,
-            aed_to_inr_rate: tx.aed_to_inr_rate || '',
-            actual_inr_distributed: tx.inr_requested,
-            distributor_id: (isAdmin || isCollector) ? (tx.distributor_id || '') : user.$id,
-            distributor_name: (isAdmin || isCollector) ? (tx.distributor_name || '') : user.name,
-        });
-        setDistributeModal(true);
     };
 
     const handleDelete = async (tx) => {
@@ -518,7 +392,6 @@ export default function TransactionsPage() {
                         </thead>
                         <tbody>
                             {filtered.map(tx => {
-                                const profitCur = tx.collected_currency || 'SAR';
                                 const profitVal = Number(tx.profit_inr) || 0;
                                 return (
                                     <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
@@ -687,100 +560,6 @@ export default function TransactionsPage() {
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
                                 <button type="submit" className="btn btn-accent" disabled={saving}>Save Transaction</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Conversion Modal (SAR -> AED) */}
-            {convertModal && activeTx && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setConvertModal(false)}>
-                    <div className="modal">
-                        <div className="modal-header">
-                            <h3 className="modal-title">SAR → AED Conversion</h3>
-                        </div>
-                        <form onSubmit={handleConversion}>
-                            <div className="modal-body">
-                                <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
-                                    <p>Collected: <strong>{activeTx.collected_amount} SAR</strong></p>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Conversion Agent</label>
-                                    <select className="form-select" required value={form.conversion_agent_id}
-                                        onChange={e => {
-                                            const a = agents.find(x => x.$id === e.target.value);
-                                            setForm({ ...form, conversion_agent_id: e.target.value, conversion_agent_name: a?.name || '' });
-                                        }}>
-                                        <option value="">Select Agent</option>
-                                        {agents.filter(a => a.type === 'conversion').map(a => <option key={a.$id} value={a.$id}>{a.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">SAR to AED Rate (Manual)</label>
-                                    <input className="form-input" type="number" step="0.0001" required
-                                        value={form.sar_to_aed_rate} onChange={e => setForm({ ...form, sar_to_aed_rate: e.target.value })}
-                                        placeholder="e.g. 0.98" />
-                                </div>
-                                {form.sar_to_aed_rate > 0 && (
-                                    <p className="mt-2 text-accent">Result: <strong>{(activeTx.collected_amount / form.sar_to_aed_rate).toFixed(2)} AED</strong></p>
-                                )}
-                            </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn btn-outline" onClick={() => setConvertModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving}>Finalize Conversion</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Distribution Modal (AED -> INR) */}
-            {distributeModal && activeTx && (
-                <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDistributeModal(false)}>
-                    <div className="modal">
-                        <div className="modal-header">
-                            <h3 className="modal-title">AED → INR Distribution</h3>
-                        </div>
-                        <form onSubmit={handleDistribution}>
-                            <div className="modal-body">
-                                <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
-                                    <p>Requested: <strong>₹{activeTx.inr_requested}</strong></p>
-                                    <p>AED Equivalent: <strong>{activeTx.actual_aed || activeTx.collected_amount} AED</strong></p>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Distributor (INR)</label>
-                                    <select className="form-select" required value={form.distributor_id}
-                                        onChange={e => {
-                                            const a = agents.find(x => x.$id === e.target.value);
-                                            setForm({ ...form, distributor_id: e.target.value, distributor_name: a?.name || '' });
-                                        }}>
-                                        <option value="">Select Distributor</option>
-                                        {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
-                                    </select>
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label className="form-label">AED Cost per 1000 INR</label>
-                                        <input className="form-input" type="number" step="0.01" required
-                                            value={form.aed_to_inr_rate} onChange={e => setForm({ ...form, aed_to_inr_rate: e.target.value })}
-                                            placeholder="e.g. 44.50" />
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">INR Actually Distributed</label>
-                                        <input className="form-input" type="number" required
-                                            value={form.actual_inr_distributed} onChange={e => setForm({ ...form, actual_inr_distributed: e.target.value })} />
-                                    </div>
-                                </div>
-                                {form.aed_to_inr_rate > 0 && (
-                                    <div className="mt-4 p-3 rounded" style={{ background: 'rgba(0,200,150,0.1)' }}>
-                                        <p>Profit: <strong className="text-accent">{calculateProfit(activeTx, activeTx.sar_to_aed_rate, form.aed_to_inr_rate, form.actual_inr_distributed)} AED</strong></p>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn btn-outline" onClick={() => setDistributeModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving}>Complete Transaction</button>
                             </div>
                         </form>
                     </div>

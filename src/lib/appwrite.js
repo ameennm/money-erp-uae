@@ -50,9 +50,9 @@ export const authService = {
             return null;
         }
     },
-    async createEmployee(email, password, name) {
+    async createEmployee(email, _password, name) {
         // Technically mapped to dbService.createEmployee
-        const res = await dbService.createEmployee({ email, password, name, role: 'collector', notes: '' });
+        const res = await dbService.createEmployee({ email, name, role: 'collector', notes: '' });
         return res;
     },
 };

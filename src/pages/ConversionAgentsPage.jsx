@@ -1,38 +1,24 @@
 import { useState, useEffect } from 'react';
-import { authService, dbService, Query, ID } from '../lib/appwrite';
+import { authService, dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import {
-    Plus, X, Pencil, Trash2, RefreshCw,
-    TrendingUp, Banknote, Wallet, List
+    Plus, X, Pencil, Trash2, RefreshCw, List
 } from 'lucide-react';
 import { SearchInput } from '../components/filters';
-import { round2 } from '../utils/filterHelpers';
 
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED', sar_balance: 0, aed_balance: 0 };
-
 const CONV_TYPES = [
-    { value: 'conversion_sar', label: 'SAR → AED', color: '#4a9eff', bg: 'rgba(74,158,255,0.15)' },
-    { value: 'conversion_aed', label: 'AED → INR', color: 'var(--brand-gold)', bg: 'rgba(245,166,35,0.15)' },
+    { value: 'conversion_sar', label: 'SAR → AED', color: '#4a9eff', bg: 'rgba(74, 158, 255, 0.05)' },
+    { value: 'conversion_aed', label: 'AED → INR', color: 'var(--brand-gold)', bg: 'rgba(245, 166, 35, 0.05)' }
 ];
-
-const convTypeBadge = (type) => {
-    const t = CONV_TYPES.find(c => c.value === type) || CONV_TYPES[0];
-    return (
-        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: t.bg, color: t.color }}>
-            {t.label}
-        </span>
-    );
-};
 
 export default function ConversionAgentsPage() {
     const [agents, setAgents] = useState([]);
     const [convRecs, setConvRecs] = useState([]);   // AED conversion records
-    const [txs, setTxs] = useState([]);
-    const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -55,16 +41,12 @@ export default function ConversionAgentsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [ar, cr, tr, ex] = await Promise.all([
+            const [ar, cr] = await Promise.all([
                 dbService.listAgents([Query.or([Query.equal('type', 'conversion_sar'), Query.equal('type', 'conversion_aed'), Query.equal('type', 'conversion')])]),
-                dbService.listAedConversions(), // Bulk SAR->AED
-                dbService.listTransactions(), // Individual SAR->AED
-                dbService.listExpenses(), // Bulk AED->INR
+                dbService.listAedConversions(),
             ]);
             setAgents(ar.documents);
             setConvRecs(cr.documents);
-            setTxs(tr.documents);
-            setExpenseRecs(ex.documents);
         } catch (e) { toast.error(e.message); }
         finally { setLoading(false); }
     };

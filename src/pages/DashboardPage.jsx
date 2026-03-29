@@ -3,15 +3,15 @@ import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import {
-    ArrowLeftRight, Users, UserCog,
+    Users, UserCog,
     TrendingUp, SendHorizonal,
     Banknote, Wallet, X, PiggyBank
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { DateRangeFilter, FilterBar } from '../components/filters';
-import { applyDateRange, round2, sum } from '../utils/filterHelpers';
+import { DateRangeFilter } from '../components/filters';
+import { applyDateRange, round2 } from '../utils/filterHelpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sumF = (arr, f) => arr.reduce((a, d) => a + (Number(d[f]) || 0), 0);
@@ -32,7 +32,6 @@ const statusBadge = (s) => {
 export default function DashboardPage() {
     const { role } = useAuth();
     const isAdmin = role === 'admin';
-    const isCollector = role === 'collector' || isAdmin;
 
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
