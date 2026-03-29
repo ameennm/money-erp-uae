@@ -5,12 +5,15 @@ import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import {
-    Plus, X, Pencil, Trash2, Search,
-    ArrowLeftRight, Copy, CheckCircle,
-    SendHorizonal, Banknote, PackageCheck, Download
+    Plus, X, Pencil, Trash2, Download
 } from 'lucide-react';
-import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
+
+// Filter components
+import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
+import { applyDateRange, round2 } from '../utils/filterHelpers';
+import { TRANSACTION_STATUSES } from '../constants';
 
 const START_TX_NUM = 20261;
 const genTxId = (existingTxs) => {
@@ -22,42 +25,10 @@ const genTxId = (existingTxs) => {
     return String(max + 1);
 };
 
-const STATUSES = [
-    { value: 'pending_collection', label: 'Pending Collection', badge: 'badge-pending' },
-    { value: 'pending_conversion', label: 'Pending Conversion (SAR→AED)', badge: 'badge-inprogress' },
-    { value: 'pending_distribution', label: 'Pending Distribution (AED→INR)', badge: 'badge-collector' },
-    { value: 'completed', label: 'Completed', badge: 'badge-completed' },
-];
-
 const statusBadge = (s) => {
-    const cfg = STATUSES.find(x => x.value === s) || STATUSES[0];
+    const cfg = TRANSACTION_STATUSES.find(x => x.value === s) || TRANSACTION_STATUSES[0];
     return <span className={`badge ${cfg.badge}`}>{cfg.label}</span>;
 };
-
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
-
-const applyDateRange = (txs, range, from, to) => {
-    if (range === 'All Time') return txs;
-    const now = new Date();
-    let start;
-    if (range === 'Today') start = startOfDay(now);
-    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') start = startOfMonth(now);
-    if (range === 'Custom') {
-        return txs.filter(r => {
-            const d = new Date(r.$createdAt);
-            const f = from ? new Date(from) : null;
-            const t = to ? new Date(to + 'T23:59:59') : null;
-            return (!f || d >= f) && (!t || d <= t);
-        });
-    }
-    return txs.filter(tx => isAfter(new Date(tx.$createdAt), start));
-};
-
-const sum = (arr, f) => arr.reduce((a, t) => a + (Number(t[f]) || 0), 0);
-
-// Safe round to 2 decimal places (avoids float precision issues)
-const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 
 const EMPTY = {
     client_name: '',
@@ -90,13 +61,8 @@ export default function TransactionsPage() {
     const [txs, setTxs] = useState([]);
     const [agents, setAgents] = useState([]);
     const [settings, setSettings] = useState({ min_sar_rate: 0, min_aed_rate: 0 });
-    const [filter, setFilter] = useState(() => {
-        const params = new URLSearchParams(window.location.search);
-        return params.get('q') || '';
-    });
-    const [dateRange, setDateRange] = useState('All Time');
-    const [customFrom, setCustomFrom] = useState('');
-    const [customTo, setCustomTo] = useState('');
+    const [search, setSearch] = useState('');
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [editTx, setEditTx] = useState(null);
@@ -464,9 +430,9 @@ export default function TransactionsPage() {
         }
     };
 
-    const filtered = applyDateRange(txs, dateRange, customFrom, customTo).filter(tx =>
-        tx.client_name?.toLowerCase().includes(filter.toLowerCase()) ||
-        tx.tx_id?.includes(filter)
+    const filtered = applyDateRange(txs, dateRange.range, dateRange.customFrom, dateRange.customTo).filter(tx =>
+        tx.client_name?.toLowerCase().includes(search.toLowerCase()) ||
+        tx.tx_id?.includes(search)
     );
 
     const exportToExcel = () => {
@@ -493,7 +459,7 @@ export default function TransactionsPage() {
         ws['!cols'] = colWidths;
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
-        const fileName = `Transactions_${dateRange.replace(/\s/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`;
+        const fileName = `Transactions_${dateRange.range.replace(/\s/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`;
         XLSX.writeFile(wb, fileName);
         toast.success(`Downloaded ${filtered.length} transactions`);
     };
@@ -510,42 +476,29 @@ export default function TransactionsPage() {
 
     return (
         <Layout title="Transactions">
-            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-                <div className="flex gap-2 flex-wrap">
-                    {DATE_RANGES.map(r => (
-                        <button key={r} onClick={() => setDateRange(r)}
-                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
-                    ))}
-                    {dateRange === 'Custom' && (
-                        <>
-                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
-                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-                            <span style={{ color: 'var(--text-muted)' }}>to</span>
-                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
-                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
-                        </>
+            <FilterBar>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search client or ID..."
+                />
+                <div className="flex gap-2 flex-wrap ml-auto">
+                    {isAdmin && (
+                        <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
+                            <Download size={16} /> Excel
+                        </button>
+                    )}
+                    {isCollector && (
+                        <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
+                            <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
+                        </button>
                     )}
                 </div>
-                <div className="flex gap-3 flex-1 flex-wrap w-full mt-2 sm:mt-0">
-                    <div style={{ position: 'relative', flex: '1 1 200px' }}>
-                        <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                        <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search client or ID..."
-                            value={filter} onChange={e => setFilter(e.target.value)} />
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                        {isAdmin && (
-                            <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
-                                <Download size={16} /> Excel
-                            </button>
-                        )}
-                        {isCollector && (
-                            <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
-                                <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
+            </FilterBar>
 
             <div className="card">
                 <div className="table-wrapper">

@@ -5,9 +5,8 @@ import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import { Plus, X, Pencil, Trash2, Users, MapPin, Banknote } from 'lucide-react';
-
-
-const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+import { SearchInput } from '../components/filters';
+import { round2 } from '../utils/filterHelpers';
 
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection', sar_balance: 0, aed_balance: 0 };
 
@@ -168,19 +167,12 @@ export default function AgentsPage() {
                             {agents.length} agent{agents.length !== 1 ? 's' : ''} registered
                         </h3>
                     </div>
-                    <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
-                        <input
-                            type="text"
-                            placeholder="Search agents by name or phone..."
-                            className="form-input"
-                            style={{ paddingLeft: '36px' }}
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                        </span>
-                    </div>
+                    <SearchInput
+                        value={searchTerm}
+                        onChange={setSearchTerm}
+                        placeholder="Search agents by name or phone..."
+                        style={{ maxWidth: '300px' }}
+                    />
                 </div>
                 <button id="new-agent-btn" className="btn btn-accent" onClick={openNew}>
                     <Plus size={16} /> Add Agent

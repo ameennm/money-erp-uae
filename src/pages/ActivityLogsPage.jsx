@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { dbService } from '../lib/appwrite';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Download, Search, Clock } from 'lucide-react';
+import { Download, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
+import { SearchInput } from '../components/filters';
 
 export default function ActivityLogsPage() {
     const [logs, setLogs] = useState([]);
@@ -111,11 +112,12 @@ export default function ActivityLogsPage() {
     return (
         <Layout title="Activity Logs">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <div style={{ position: 'relative', flex: 1, maxWidth: 400 }}>
-                    <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search logs..."
-                        value={search} onChange={e => setSearch(e.target.value)} />
-                </div>
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search logs..."
+                    style={{ maxWidth: 400 }}
+                />
                 <button className="btn btn-outline" onClick={exportToExcel}><Download size={16} /> Export Excel</button>
             </div>
 

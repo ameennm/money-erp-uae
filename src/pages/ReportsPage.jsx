@@ -1,47 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { dbService } from '../lib/appwrite';
 import Layout from '../components/Layout';
-import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Download, Search, FileSpreadsheet, Filter, MessageCircle } from 'lucide-react';
-import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import { Download, FileSpreadsheet, MessageCircle } from 'lucide-react';
+import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
-
-const applyDateRange = (arr, range, from, to) => {
-    if (range === 'All Time') return arr;
-    const now = new Date();
-    let start;
-    if (range === 'Today') start = startOfDay(now);
-    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') start = startOfMonth(now);
-    if (range === 'Custom') {
-        return arr.filter(r => {
-            const d = new Date(r._date);
-            const f = from ? new Date(from) : null;
-            const t = to ? new Date(to + 'T23:59:59') : null;
-            return (!f || d >= f) && (!t || d <= t);
-        });
-    }
-    return arr.filter(r => isAfter(new Date(r._date), start));
-};
+// Filter components
+import { SearchInput, DateRangeFilter, CurrencyFilter, TypeFilter, FilterBar } from '../components/filters';
+import { applyDateRange } from '../utils/filterHelpers';
 
 const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
-export default function ReportsPage() {
-    const { role } = useAuth();
+const TYPE_OPTIONS = [
+    { value: 'income', label: 'Income', color: 'var(--brand-accent)' },
+    { value: 'expense', label: 'Expenses', color: 'var(--status-failed)' }
+];
 
+export default function ReportsPage() {
     const [txs, setTxs] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [aedConversions, setAedConversions] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [dateRange, setDateRange] = useState('All Time');
-    const [customFrom, setCustomFrom] = useState('');
-    const [customTo, setCustomTo] = useState('');
+
+    // Filter states
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
     const [search, setSearch] = useState('');
-    const [showIncome, setShowIncome] = useState(true);
-    const [showExpense, setShowExpense] = useState(true);
+    const [typeFilter, setTypeFilter] = useState(['income', 'expense']);
     const [currencyFilter, setCurrencyFilter] = useState('All');
 
     const fetchAll = async () => {
@@ -65,132 +50,155 @@ export default function ReportsPage() {
     useEffect(() => { fetchAll(); }, []);
 
     // Build unified ledger entries
-    const allEntries = [];
+    const allEntries = useMemo(() => {
+        const entries = [];
 
-    // Distribution (Debit in INR) - money leaving the system to customers!
-    txs.forEach(tx => {
-        if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
-            allEntries.push({
-                _type: 'transaction',
-                _date: tx.$updatedAt || tx.$createdAt,
-                _id: tx.$id + '_dist',
-                particular: `${tx.client_name} — Distribution`,
-                txId: tx.tx_id || '',
-                currency: 'INR',
-                credit: 0,
-                debit: Number(tx.actual_inr_distributed),
-                agent: tx.distributor_name || '',
-                notes: tx.notes || '',
-            });
-        }
-    });
-
-    if (showIncome) {
-        expenses.filter(e => e.type === 'income').forEach(e => {
-            allEntries.push({
-                _type: 'income',
-                _date: e.$createdAt,
-                _id: e.$id,
-                particular: e.title || 'Income',
-                txId: '',
-                currency: e.currency || 'AED',
-                credit: Number(e.amount) || 0,
-                debit: 0,
-                agent: '',
-                notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
-            });
+        // Distribution (Debit in INR) - money leaving the system to customers!
+        txs.forEach(tx => {
+            if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
+                entries.push({
+                    _type: 'transaction',
+                    _date: tx.$updatedAt || tx.$createdAt,
+                    _id: tx.$id + '_dist',
+                    particular: `${tx.client_name} — Distribution`,
+                    txId: tx.tx_id || '',
+                    currency: 'INR',
+                    credit: 0,
+                    debit: Number(tx.actual_inr_distributed),
+                    agent: tx.distributor_name || '',
+                    notes: tx.notes || '',
+                });
+            }
         });
-    }
 
-    if (showExpense) {
-        // Exclude internal transfers/deposits to distributors since they are still inside the system
-        expenses
-            .filter(e => e.type !== 'income' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer')
-            .forEach(e => {
-                allEntries.push({
-                    _type: 'expense',
+        if (typeFilter.includes('income')) {
+            expenses.filter(e => e.type === 'income').forEach(e => {
+                entries.push({
+                    _type: 'income',
                     _date: e.$createdAt,
                     _id: e.$id,
-                    particular: e.title || 'Expense',
+                    particular: e.title || 'Income',
                     txId: '',
                     currency: e.currency || 'AED',
-                    credit: 0,
-                    debit: Number(e.amount) || 0,
+                    credit: Number(e.amount) || 0,
+                    debit: 0,
                     agent: '',
                     notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
                 });
             });
+        }
 
-        // Show SAR -> AED Conversions in the ledger
-        aedConversions.forEach(c => {
-            // SAR Out (Debit)
-            allEntries.push({
-                _type: 'expense',
-                _date: c.$createdAt || c.date,
-                _id: c.$id + '_sar',
-                particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
-                txId: '',
-                currency: 'SAR',
-                credit: 0,
-                debit: Number(c.sar_amount) || 0,
-                agent: c.conversion_agent_name || '',
-                notes: `Rate: ${c.sar_rate || ''}`,
+        if (typeFilter.includes('expense')) {
+            // Exclude internal transfers/deposits to distributors since they are still inside the system
+            expenses
+                .filter(e => e.type !== 'income' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer')
+                .forEach(e => {
+                    entries.push({
+                        _type: 'expense',
+                        _date: e.$createdAt,
+                        _id: e.$id,
+                        particular: e.title || 'Expense',
+                        txId: '',
+                        currency: e.currency || 'AED',
+                        credit: 0,
+                        debit: Number(e.amount) || 0,
+                        agent: '',
+                        notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
+                    });
+                });
+
+            // Show SAR -> AED Conversions in the ledger
+            aedConversions.forEach(c => {
+                // SAR Out (Debit)
+                entries.push({
+                    _type: 'expense',
+                    _date: c.$createdAt || c.date,
+                    _id: c.$id + '_sar',
+                    particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
+                    txId: '',
+                    currency: 'SAR',
+                    credit: 0,
+                    debit: Number(c.sar_amount) || 0,
+                    agent: c.conversion_agent_name || '',
+                    notes: `Rate: ${c.sar_rate || ''}`,
+                });
+
+                // AED In (Credit)
+                entries.push({
+                    _type: 'income',
+                    _date: c.$createdAt || c.date,
+                    _id: c.$id + '_aed',
+                    particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
+                    txId: '',
+                    currency: 'AED',
+                    credit: Number(c.aed_amount) || 0,
+                    debit: 0,
+                    agent: c.conversion_agent_name || '',
+                    notes: `Converted from ${Number(c.sar_amount) || 0} SAR`,
+                });
             });
+        }
 
-            // AED In (Credit)
-            allEntries.push({
-                _type: 'income',
-                _date: c.$createdAt || c.date,
-                _id: c.$id + '_aed',
-                particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
-                txId: '',
-                currency: 'AED',
-                credit: Number(c.aed_amount) || 0,
-                debit: 0,
-                agent: c.conversion_agent_name || '',
-                notes: `Converted from ${Number(c.sar_amount) || 0} SAR`,
-            });
-        });
-    }
-
-    // Sort by date ascending for ledger
-    allEntries.sort((a, b) => new Date(a._date) - new Date(b._date));
+        // Sort by date ascending for ledger
+        entries.sort((a, b) => new Date(a._date) - new Date(b._date));
+        return entries;
+    }, [txs, expenses, aedConversions, typeFilter]);
 
     // Apply filters
-    const dateFiltered = applyDateRange(allEntries, dateRange, customFrom, customTo);
-    const filtered = dateFiltered.filter(r => {
-        const matchCurrency = currencyFilter === 'All' || r.currency === currencyFilter;
-        const matchSearch = r.particular?.toLowerCase().includes(search.toLowerCase()) ||
-            r.txId?.includes(search) ||
-            r.agent?.toLowerCase().includes(search.toLowerCase()) ||
-            r.notes?.toLowerCase().includes(search.toLowerCase());
-        return matchCurrency && matchSearch;
-    });
+    const filtered = useMemo(() => {
+        let result = [...allEntries];
+
+        // Apply date range
+        result = applyDateRange(result, dateRange.range, dateRange.customFrom, dateRange.customTo, '_date');
+
+        // Apply currency filter
+        if (currencyFilter !== 'All') {
+            result = result.filter(r => r.currency === currencyFilter);
+        }
+
+        // Apply search filter
+        if (search.trim()) {
+            const term = search.toLowerCase();
+            result = result.filter(r =>
+                r.particular?.toLowerCase().includes(term) ||
+                r.txId?.toLowerCase().includes(term) ||
+                r.agent?.toLowerCase().includes(term) ||
+                r.notes?.toLowerCase().includes(term)
+            );
+        }
+
+        return result;
+    }, [allEntries, dateRange, currencyFilter, search]);
 
     // Ledger totals per currency
     const allCurrencies = ['SAR', 'AED', 'INR'];
     const displayCurrencies = currencyFilter === 'All' ? allCurrencies : [currencyFilter];
 
-    const totals = {};
-    displayCurrencies.forEach(cur => {
-        const curEntries = filtered.filter(e => e.currency === cur);
-        const totalCredit = curEntries.reduce((a, e) => a + Number(e.credit || 0), 0);
-        const totalDebit = curEntries.reduce((a, e) => a + Number(e.debit || 0), 0);
-        let bal = totalCredit - totalDebit;
-        if (Math.abs(bal) < 0.001) bal = 0; // Fix -0 issue
-        totals[cur] = { credit: totalCredit, debit: totalDebit, balance: bal };
-    });
+    const totals = useMemo(() => {
+        const result = {};
+        displayCurrencies.forEach(cur => {
+            const curEntries = filtered.filter(e => e.currency === cur);
+            const totalCredit = curEntries.reduce((a, e) => a + Number(e.credit || 0), 0);
+            const totalDebit = curEntries.reduce((a, e) => a + Number(e.debit || 0), 0);
+            let bal = totalCredit - totalDebit;
+            if (Math.abs(bal) < 0.001) bal = 0;
+            result[cur] = { credit: totalCredit, debit: totalDebit, balance: bal };
+        });
+        return result;
+    }, [filtered, displayCurrencies]);
 
     // Running balance per currency
-    const runningBal = { SAR: 0, AED: 0, INR: 0 };
-    const entriesWithBalance = filtered.map(entry => {
-        const cur = entry.currency;
-        if (cur && runningBal[cur] !== undefined) {
-            runningBal[cur] += Number(entry.credit || 0) - Number(entry.debit || 0);
-            if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
-        }
-        return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
-    });
+    const entriesWithBalance = useMemo(() => {
+        const runningBal = { SAR: 0, AED: 0, INR: 0 };
+        return filtered.map(entry => {
+            const cur = entry.currency;
+            if (cur && runningBal[cur] !== undefined) {
+                runningBal[cur] += Number(entry.credit || 0) - Number(entry.debit || 0);
+                if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
+            }
+            return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
+        });
+    }, [filtered]);
 
     const exportToExcel = () => {
         if (filtered.length === 0) return toast.error('No records to export');
@@ -227,7 +235,7 @@ export default function ReportsPage() {
 
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Ledger');
-        const fileName = `Ledger_${dateRange.replace(/\s/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`;
+        const fileName = `Ledger_${dateRange.range.replace(/\s/g, '_')}_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`;
         XLSX.writeFile(wb, fileName);
         toast.success(`Downloaded ledger with ${filtered.length} entries`);
     };
@@ -235,7 +243,7 @@ export default function ReportsPage() {
     const shareOnWhatsApp = () => {
         const lines = [
             `📊 *MoneyFlow Ledger Report*`,
-            `Period: ${dateRange}`,
+            `Period: ${dateRange.range}`,
             `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
             `─────────────────────`,
             `*Currency Summary:*`,
@@ -260,6 +268,20 @@ export default function ReportsPage() {
         return <span className="badge" style={{ background: 'rgba(255,84,112,0.15)', color: 'var(--status-failed)', fontSize: 10, padding: '2px 8px' }}>DR</span>;
     };
 
+    const resetFilters = () => {
+        setDateRange({ range: 'All Time', customFrom: '', customTo: '' });
+        setSearch('');
+        setTypeFilter(['income', 'expense']);
+        setCurrencyFilter('All');
+    };
+
+    const activeFilterCount = [
+        dateRange.range !== 'All Time',
+        search,
+        currencyFilter !== 'All',
+        typeFilter.length !== 2
+    ].filter(Boolean).length;
+
     if (loading) {
         return (
             <Layout title="Ledger">
@@ -275,7 +297,7 @@ export default function ReportsPage() {
 
             {/* ── Ledger Summary ─────────────────────────────────────── */}
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)', marginBottom: 12 }}>
-                Ledger Summary — {dateRange}
+                Ledger Summary — {dateRange.range}
             </div>
             <div className="stats-grid" style={{ marginBottom: 32 }}>
                 {displayCurrencies.map(cur => {
@@ -309,68 +331,30 @@ export default function ReportsPage() {
                 })}
             </div>
 
-            {/* ── Filters ─────────────────────────────────────────── */}
-            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-                <div className="flex gap-2 flex-wrap">
-                    {DATE_RANGES.map(r => (
-                        <button key={r} onClick={() => setDateRange(r)}
-                            className={`btn btn-sm ${dateRange === r ? 'btn-accent' : 'btn-outline'}`}>{r}</button>
-                    ))}
-                    {dateRange === 'Custom' && (
-                        <>
-                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
-                                value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-                            <span style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>to</span>
-                            <input type="date" className="form-input" style={{ maxWidth: 140, padding: '4px 8px', fontSize: 13 }}
-                                value={customTo} onChange={e => setCustomTo(e.target.value)} />
-                        </>
-                    )}
-                </div>
-            </div>
-
-            {/* ── Type Checkboxes + Search + Download ─────────────── */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-                <div className="flex gap-4 flex-wrap" style={{ fontSize: 13 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showIncome ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
-                        <input type="checkbox" checked={showIncome} onChange={e => setShowIncome(e.target.checked)}
-                            style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
-                        Income
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: showExpense ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
-                        <input type="checkbox" checked={showExpense} onChange={e => setShowExpense(e.target.checked)}
-                            style={{ accentColor: 'var(--brand-accent)', width: 15, height: 15 }} />
-                        Expenses
-                    </label>
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                    <div style={{ position: 'relative', flex: 1 }}>
-                        <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                        <input className="form-input" style={{ paddingLeft: 38, width: '100%' }} placeholder="Search particulars..."
-                            value={search} onChange={e => setSearch(e.target.value)} />
-                    </div>
-                    <div className="flex gap-1" style={{ background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 8 }}>
-                        {['All', 'SAR', 'AED', 'INR'].map(c => (
-                            <button
-                                key={c}
-                                onClick={() => setCurrencyFilter(c)}
-                                style={{
-                                    padding: '4px 12px',
-                                    fontSize: 12,
-                                    fontWeight: currencyFilter === c ? 700 : 500,
-                                    borderRadius: 6,
-                                    border: 'none',
-                                    color: currencyFilter === c ? '#fff' : 'var(--text-muted)',
-                                    background: currencyFilter === c
-                                        ? (c === 'SAR' ? '#4a9eff' : c === 'AED' ? 'var(--brand-gold)' : c === 'INR' ? '#a78bfa' : 'var(--brand-accent)')
-                                        : 'transparent',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                            >
-                                {c}
-                            </button>
-                        ))}
-                    </div>
+            {/* ── Filter Bar ─────────────────────────────────────────── */}
+            <FilterBar showClearAll onClearAll={resetFilters} activeFilterCount={activeFilterCount}>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
+                <TypeFilter
+                    value={typeFilter}
+                    onChange={setTypeFilter}
+                    options={TYPE_OPTIONS}
+                    type="checkboxes"
+                    multiSelect
+                />
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search particulars..."
+                />
+                <CurrencyFilter
+                    value={currencyFilter}
+                    onChange={setCurrencyFilter}
+                    currencies={['All', 'SAR', 'AED', 'INR']}
+                />
+                <div className="flex gap-2 ml-auto">
                     <button className="btn btn-outline" onClick={exportToExcel} style={{ whiteSpace: 'nowrap' }}>
                         <Download size={16} /> Excel
                     </button>
@@ -383,7 +367,7 @@ export default function ReportsPage() {
                         <MessageCircle size={15} /> WhatsApp
                     </button>
                 </div>
-            </div>
+            </FilterBar>
 
             {/* ── Ledger Table ────────────────────────────────────── */}
             {filtered.length === 0 ? (
@@ -396,7 +380,7 @@ export default function ReportsPage() {
                     <div className="card-header">
                         <div>
                             <div className="card-title">Ledger</div>
-                            <div className="card-subtitle">{filtered.length} entries — {dateRange}</div>
+                            <div className="card-subtitle">{filtered.length} entries — {dateRange.range}</div>
                         </div>
                     </div>
                     <div className="table-wrapper">

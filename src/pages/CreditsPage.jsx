@@ -6,28 +6,11 @@ import toast from 'react-hot-toast';
 import {
     Plus, X, Trash2, Wallet2, TrendingUp, TrendingDown, Scale
 } from 'lucide-react';
-import {
-    format, startOfDay, startOfWeek, startOfMonth, isAfter
-} from 'date-fns';
+import { format } from 'date-fns';
 
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
-const applyRange = (arr, range, from, to) => {
-    if (range === 'All Time') return arr;
-    const now = new Date();
-    let start;
-    if (range === 'Today') start = startOfDay(now);
-    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') start = startOfMonth(now);
-    if (range === 'Custom') {
-        return arr.filter(r => {
-            const d = new Date(r.$createdAt);
-            const f = from ? new Date(from) : null;
-            const t = to ? new Date(to + 'T23:59:59') : null;
-            return (!f || d >= f) && (!t || d <= t);
-        });
-    }
-    return arr.filter(r => isAfter(new Date(r.$createdAt), start));
-};
+// Filter components
+import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
+import { applyDateRange } from '../utils/filterHelpers';
 
 const EMPTY_CREDIT = { from_person: '', reason: '', amount_sar: '' };
 
@@ -39,9 +22,10 @@ export default function CreditsPage() {
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY_CREDIT);
     const [saving, setSaving] = useState(false);
-    const [dateRange, setDateRange] = useState('Today');
-    const [customFrom, setCustomFrom] = useState('');
-    const [customTo, setCustomTo] = useState('');
+
+    // Filter states
+    const [search, setSearch] = useState('');
+    const [dateRange, setDateRange] = useState({ range: 'Today', customFrom: '', customTo: '' });
 
     const fetch = async () => {
         setLoading(true);
@@ -87,9 +71,14 @@ export default function CreditsPage() {
         catch (e) { toast.error(e.message); }
     };
 
-    // ── Range-filtered data ────────────────────────────────────────────────────
-    const filteredCredits = applyRange(credits, dateRange, customFrom, customTo);
-    const filteredTxs = applyRange(txs, dateRange, customFrom, customTo);
+    // ── Filtered data ──────────────────────────────────────────────────────────
+    const filteredCredits = applyDateRange(credits, dateRange.range, dateRange.customFrom, dateRange.customTo)
+        .filter(c =>
+            !search ||
+            c.from_person?.toLowerCase().includes(search.toLowerCase()) ||
+            c.reason?.toLowerCase().includes(search.toLowerCase())
+        );
+    const filteredTxs = applyDateRange(txs, dateRange.range, dateRange.customFrom, dateRange.customTo);
 
     const totalReceived = filteredCredits.filter(c => c.admin_approved).reduce((a, c) => a + (Number(c.amount_sar) || 0), 0);
     // "total sent" = sum of amount_sar in transactions that have been sent (sar_sent / aed_received / completed)
@@ -100,26 +89,18 @@ export default function CreditsPage() {
 
     return (
         <Layout title="Credits">
-            {/* ── Date Range ─────────────────────────────────────────────────────── */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20, alignItems: 'center' }}>
-                {DATE_RANGES.map(r => (
-                    <button key={r} onClick={() => setDateRange(r)} className="btn btn-sm"
-                        style={{
-                            background: dateRange === r ? 'var(--brand-accent)' : 'var(--bg-card)',
-                            color: dateRange === r ? '#fff' : 'var(--text-secondary)',
-                            border: `1px solid ${dateRange === r ? 'var(--brand-accent)' : 'var(--border-color)'}`,
-                        }}>{r}</button>
-                ))}
-                {dateRange === 'Custom' && (
-                    <>
-                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
-                            value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-                        <span style={{ color: 'var(--text-muted)' }}>to</span>
-                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
-                            value={customTo} onChange={e => setCustomTo(e.target.value)} />
-                    </>
-                )}
-            </div>
+            {/* ── Filter Bar ─────────────────────────────────────────────────────── */}
+            <FilterBar>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search by person or reason..."
+                />
+            </FilterBar>
 
             {/* ── Summary Cards ──────────────────────────────────────────────────── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px,1fr))', gap: 16, marginBottom: 20 }}>

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { dbService, Query } from '../lib/appwrite';
+import { useState, useEffect, useMemo } from 'react';
+import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
@@ -7,13 +7,28 @@ import { Plus, X, Trash2, TrendingDown, TrendingUp, Download } from 'lucide-reac
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 
-const EXPENSE_CATEGORIES = [
-    'Office Rent', 'Salaries', 'Commission', 'Transfer Fees',
-    'Bank Charges', 'Utilities', 'Marketing', 'Miscellaneous'
-];
-const INCOME_CATEGORIES = ['Service Fee', 'Markup', 'Capital Injection', 'Agent Payment', 'Other Income'];
+// Filter components
+import { SearchInput, DateRangeFilter, CurrencyFilter, TypeFilter, FilterBar } from '../components/filters';
+import { applyDateRange, createSearchMatcher } from '../utils/filterHelpers';
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../constants';
 
-const EMPTY = { title: '', type: 'expense', category: EXPENSE_CATEGORIES[0], amount: '', currency: 'AED', date: '', notes: '', distributor_id: '', distributor_name: '' };
+const EMPTY = {
+    title: '',
+    type: 'expense',
+    category: EXPENSE_CATEGORIES[0],
+    amount: '',
+    currency: 'AED',
+    date: '',
+    notes: '',
+    distributor_id: '',
+    distributor_name: ''
+};
+
+const TYPE_OPTIONS = [
+    { value: 'all', label: 'All' },
+    { value: 'income', label: 'Income', color: 'var(--brand-accent)' },
+    { value: 'expense', label: 'Expenses', color: 'var(--status-failed)' }
+];
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
@@ -22,7 +37,12 @@ export default function ExpensesPage() {
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
+
+    // Filter states
+    const [search, setSearch] = useState('');
+    const [typeFilter, setTypeFilter] = useState('all');
     const [currencyFilter, setCurrencyFilter] = useState('All');
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
 
     const fetch = async () => {
         setLoading(true);
@@ -42,33 +62,52 @@ export default function ExpensesPage() {
 
     useEffect(() => { fetch(); }, []);
 
-    const filteredExpenses = expenses.filter(e => currencyFilter === 'All' || e.currency === currencyFilter);
+    // Combined filter logic
+    const filteredExpenses = useMemo(() => {
+        let result = [...expenses];
 
-    const expenseSAR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const expenseAED = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
-    const expenseINR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+        // Apply date range filter
+        result = applyDateRange(result, dateRange.range, dateRange.customFrom, dateRange.customTo);
+
+        // Apply type filter
+        if (typeFilter !== 'all') {
+            result = result.filter(e => e.type === typeFilter);
+        }
+
+        // Apply currency filter
+        if (currencyFilter !== 'All') {
+            result = result.filter(e => e.currency === currencyFilter);
+        }
+
+        // Apply search filter
+        const searchMatcher = createSearchMatcher(['title', 'notes', 'category', 'distributor_name']);
+        result = result.filter(e => searchMatcher(e, search));
+
+        return result;
+    }, [expenses, dateRange, typeFilter, currencyFilter, search]);
+
+    // Calculate totals
     const incomeSAR = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const incomeAED = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
     const incomeINR = filteredExpenses.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseSAR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'SAR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseAED = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'AED').reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const expenseINR = filteredExpenses.filter(e => e.type !== 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
     const handleSave = async (ev) => {
         ev.preventDefault();
         setSaving(true);
         try {
             const amt = parseFloat(form.amount) || 0;
-            const payload = {
-                ...form,
-                amount: amt,
-            };
+            const payload = { ...form, amount: amt };
             const selectedAgent = agents.find(a => a.$id === form.distributor_id);
             payload.distributor_name = selectedAgent ? selectedAgent.name : '';
-            
+
             const created = await dbService.createExpense(payload);
 
             const isDeposit = form.category?.includes('Deposit') || form.category === 'Capital Injection';
             const ledgerType = isDeposit ? 'debit' : 'credit';
 
-            // Record in Ledger if agent is linked
             if (selectedAgent) {
                 await ledgerService.recordEntry({
                     agent: selectedAgent,
@@ -134,6 +173,20 @@ export default function ExpensesPage() {
         return [];
     };
 
+    const resetFilters = () => {
+        setSearch('');
+        setTypeFilter('all');
+        setCurrencyFilter('All');
+        setDateRange({ range: 'All Time', customFrom: '', customTo: '' });
+    };
+
+    const activeFilterCount = [
+        search,
+        typeFilter !== 'all',
+        currencyFilter !== 'All',
+        dateRange.range !== 'All Time'
+    ].filter(Boolean).length;
+
     return (
         <Layout title="Income &amp; Ops">
             <div className="stats-grid mb-6">
@@ -172,18 +225,36 @@ export default function ExpensesPage() {
                 </div>
             </div>
 
-            <div className="flex items-center justify-between mb-6" style={{ gap: 12, flexWrap: 'wrap' }}>
+            {/* Filter Bar */}
+            <FilterBar showClearAll onClearAll={resetFilters} activeFilterCount={activeFilterCount}>
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search title, notes, category..."
+                />
+                <TypeFilter
+                    value={typeFilter}
+                    onChange={setTypeFilter}
+                    options={TYPE_OPTIONS}
+                    type="tabs"
+                />
+                <CurrencyFilter
+                    value={currencyFilter}
+                    onChange={setCurrencyFilter}
+                    currencies={['All', 'SAR', 'AED', 'INR']}
+                />
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
+            </FilterBar>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between mb-6" style={{ gap: 12, flexWrap: 'wrap', marginTop: -12 }}>
                 <div style={{ color: 'var(--text-secondary)', fontSize: 14, fontWeight: 500 }}>
                     {filteredExpenses.length} record{filteredExpenses.length !== 1 ? 's' : ''}
                 </div>
                 <div className="flex gap-3 items-center flex-wrap">
-                    <select className="form-select" style={{ maxWidth: 140, fontSize: 13, padding: '6px 10px', height: '36px' }}
-                        value={currencyFilter} onChange={e => setCurrencyFilter(e.target.value)}>
-                        <option value="All">All Currencies</option>
-                        <option value="SAR">SAR</option>
-                        <option value="AED">AED</option>
-                        <option value="INR">INR</option>
-                    </select>
                     <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
                         <Download size={15} /> Excel
                     </button>
@@ -205,7 +276,7 @@ export default function ExpensesPage() {
             ) : filteredExpenses.length === 0 ? (
                 <div className="empty-state card">
                     <TrendingDown size={40} />
-                    <p>No expenses found for selected filters.</p>
+                    <p>{expenses.length === 0 ? 'No records yet. Add your first income or expense.' : 'No records found for selected filters.'}</p>
                 </div>
             ) : (
                 <div className="card">

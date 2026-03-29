@@ -5,36 +5,16 @@ import Layout from '../components/Layout';
 import {
     ArrowLeftRight, Users, UserCog,
     TrendingUp, SendHorizonal,
-    Banknote, Wallet, X, PiggyBank, CircleDollarSign
+    Banknote, Wallet, X, PiggyBank
 } from 'lucide-react';
-import { format, startOfDay, startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-
-const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+import { DateRangeFilter, FilterBar } from '../components/filters';
+import { applyDateRange, round2, sum } from '../utils/filterHelpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sumF = (arr, f) => arr.reduce((a, d) => a + (Number(d[f]) || 0), 0);
-
-const DATE_RANGES = ['Today', 'This Week', 'This Month', 'All Time', 'Custom'];
-
-const filterByRange = (arr, range, from, to) => {
-    if (range === 'All Time') return arr;
-    const now = new Date();
-    let start;
-    if (range === 'Today') start = startOfDay(now);
-    if (range === 'This Week') start = startOfWeek(now, { weekStartsOn: 1 });
-    if (range === 'This Month') start = startOfMonth(now);
-    if (range === 'Custom') {
-        return arr.filter(r => {
-            const d = new Date(r.$createdAt);
-            const f = from ? new Date(from) : null;
-            const t = to ? new Date(to + 'T23:59:59') : null;
-            return (!f || d >= f) && (!t || d <= t);
-        });
-    }
-    return arr.filter(r => isAfter(new Date(r.$createdAt), start));
-};
 
 const STATUSES = {
     pending_collection: { label: 'Pending Collection', badge: 'badge-pending' },
@@ -72,9 +52,7 @@ export default function DashboardPage() {
     const [inrForm, setInrForm] = useState({ aed_amount: '', aed_to_inr_rate: '', conversion_agent_id: '', conversion_agent_name: '' });
 
     // Date range
-    const [dateRange, setDateRange] = useState('All Time');
-    const [customFrom, setCustomFrom] = useState('');
-    const [customTo, setCustomTo] = useState('');
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
 
     const fetchAll = async () => {
         setLoading(true);
@@ -232,7 +210,7 @@ export default function DashboardPage() {
     };
 
     // ── Filtered data ──────────────────────────────────────────────────────────
-    const fTxs = useMemo(() => filterByRange(txs, dateRange), [txs, dateRange]);
+    const fTxs = useMemo(() => applyDateRange(txs, dateRange.range, dateRange.customFrom, dateRange.customTo), [txs, dateRange]);
 
     // ── Aggregates ────────────────────────────────────────────────────────────
     const completed = fTxs.filter(t => t.status === 'completed');
@@ -298,24 +276,11 @@ export default function DashboardPage() {
         <Layout title="Dashboard">
 
             {/* ── Date Range Filter ────────────────────────────────────────────── */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 24, alignItems: 'center' }}>
-                {DATE_RANGES.map(r => (
-                    <button key={r} onClick={() => setDateRange(r)} className="btn btn-sm"
-                        style={{
-                            background: dateRange === r ? 'var(--brand-accent)' : 'var(--bg-card)',
-                            color: dateRange === r ? '#fff' : 'var(--text-secondary)',
-                            border: `1px solid ${dateRange === r ? 'var(--brand-accent)' : 'var(--border-color)'}`,
-                        }}>{r}</button>
-                ))}
-                {dateRange === 'Custom' && (
-                    <>
-                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
-                            value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-                        <span style={{ color: 'var(--text-muted)' }}>to</span>
-                        <input type="date" className="form-input" style={{ maxWidth: 148, padding: '6px 10px', fontSize: 13 }}
-                            value={customTo} onChange={e => setCustomTo(e.target.value)} />
-                    </>
-                )}
+            <div style={{ marginBottom: 24 }}>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
             </div>
 
             {/* ── Financial Summary ────────────────────────── */}
@@ -323,7 +288,7 @@ export default function DashboardPage() {
                 <>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', color: 'var(--text-muted)' }}>
-                            Financial Summary — {dateRange}
+                            Financial Summary — {dateRange.range}
                         </div>
                     </div>
                     <div className="stats-grid" style={{ marginBottom: 28 }}>
@@ -498,7 +463,7 @@ export default function DashboardPage() {
                 <div className="card-header">
                     <div>
                         <div className="card-title">Recent Transactions</div>
-                        <div className="card-subtitle">{dateRange} — {recentTxs.length} shown</div>
+                        <div className="card-subtitle">{dateRange.range} — {recentTxs.length} shown</div>
                     </div>
                 </div>
                 {recentTxs.length === 0 ? (
