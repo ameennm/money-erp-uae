@@ -115,6 +115,9 @@ export default function ExpensesPage() {
     const handleDelete = async (id) => {
         if (!window.confirm('Delete this expense?')) return;
         try {
+            // ── Remove related ledger entries and rollback balances if any ──
+            await ledgerService.deleteRelatedEntries(id, 'expense');
+
             await dbService.deleteExpense(id);
             toast.success('Deleted');
             setExpenses(prev => prev.filter(e => e.$id !== id));

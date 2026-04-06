@@ -55,7 +55,43 @@ export const ledgerService = {
     },
 
     /**
-     * Reverses a ledger entry (e.g. when a transaction is deleted)
+     * Completely removes all ledger entries for a reference and rolls back agent balances.
+     */
+    async deleteRelatedEntries(reference_id, reference_type) {
+        if (!reference_id || !reference_type) return;
+
+        // 1. Find the entries to delete
+        const entriesRes = await dbService.listLedgerEntries();
+        const relatedEntries = entriesRes.documents.filter(e => e.reference_id === reference_id && e.reference_type === reference_type);
+
+        for (const entry of relatedEntries) {
+            try {
+                // 2. Fetch latest agent data for rollback
+                const agent = await dbService.getAgent(entry.agent_id);
+                if (agent) {
+                    const balField = entry.currency === 'INR' ? 'inr_balance' : (entry.currency === 'SAR' ? 'sar_balance' : 'aed_balance');
+                    const currentBal = round2(agent[balField] || 0);
+                    
+                    // Undo the change: 
+                    // If it was a debit (increased balance), we subtract.
+                    // If it was a credit (decreased balance), we add back.
+                    const sign = entry.type === 'debit' ? -1 : 1;
+                    const rolledBack = round2(currentBal + (entry.amount * sign));
+
+                    // 3. Update agent balance
+                    await dbService.updateAgent(agent.$id, { [balField]: rolledBack });
+                }
+
+                // 4. Delete the ledger entry itself
+                await dbService.deleteLedgerEntry(entry.$id);
+            } catch (err) {
+                console.error(`Failed to rollback/delete ledger entry ${entry.$id}:`, err);
+            }
+        }
+    },
+
+    /**
+     * Reverses a ledger entry (DEPRECATED - use deleteRelatedEntries for hard delete)
      */
     async reverseEntry(reference_id, reference_type, descriptionPrefix = 'REVERSED: ') {
         // Find the entry to reverse

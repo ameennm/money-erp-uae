@@ -147,8 +147,8 @@ export default function TransactionsPage() {
                 } else {
                     payload.edit_pending_approval = false;
 
-                    // ── Reverse all ledger entries for this transaction ──
-                    await ledgerService.reverseEntry(editTx.$id, 'transaction', 'EDIT REVERSAL: ');
+                    // ── Remove all ledger entries for old version of this transaction ──
+                    await ledgerService.deleteRelatedEntries(editTx.$id, 'transaction');
 
                     // ── Record new ledger entries based on NEW payload ──
                     const dist = agents.find(a => a.$id === payload.distributor_id);
@@ -339,8 +339,8 @@ export default function TransactionsPage() {
         if (!isAdmin) return toast.error('Only admins can delete transactions');
         if (!confirm(`Delete transaction #${tx.tx_id} for ${tx.client_name}? This cannot be undone.`)) return;
         try {
-            // ── Reverse all ledger entries for this transaction ──
-            await ledgerService.reverseEntry(tx.$id, 'transaction');
+            // ── Remove related ledger entries and rollback balances ──
+            await ledgerService.deleteRelatedEntries(tx.$id, 'transaction');
 
             await dbService.deleteTransaction(tx.$id);
             toast.success(`Transaction #${tx.tx_id} deleted`);
