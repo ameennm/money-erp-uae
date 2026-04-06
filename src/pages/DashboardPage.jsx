@@ -3,30 +3,16 @@ import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import {
-    Users, UserCog,
     TrendingUp, SendHorizonal,
-    Banknote, Wallet, X, PiggyBank
+    X, PiggyBank
 } from 'lucide-react';
-import { format } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { DateRangeFilter } from '../components/filters';
 import { applyDateRange, round2 } from '../utils/filterHelpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const sumF = (arr, f) => arr.reduce((a, d) => a + (Number(d[f]) || 0), 0);
 
-const STATUSES = {
-    pending_collection: { label: 'Pending Collection', badge: 'badge-pending' },
-    pending_conversion: { label: 'Pending Conversion', badge: 'badge-inprogress' },
-    pending_distribution: { label: 'Pending Distribution', badge: 'badge-collector' },
-    completed: { label: 'Completed', badge: 'badge-completed' },
-};
-
-const statusBadge = (s) => {
-    const cfg = STATUSES[s] || STATUSES.pending_collection;
-    return <span className={`badge ${cfg.badge}`}>{cfg.label}</span>;
-};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
@@ -42,7 +28,7 @@ export default function DashboardPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ag, lg] = await Promise.all([
+            const [, , lg] = await Promise.all([
                 dbService.listTransactions(),
                 dbService.listAgents(),
                 dbService.listLedgerEntries(),
@@ -134,5 +120,4 @@ function Card({ label, value, cur, color, icon }) {
             </div>
         </div>
     );
-}
 }
