@@ -33,7 +33,7 @@ const statusBadge = (s) => {
 const EMPTY = {
     client_name: '',
     inr_requested: '',
-    collected_currency: 'SAR',
+    collected_currency: '',
     collected_amount: '',
     collection_rate: '',
     sar_to_aed_rate: '',
@@ -48,6 +48,7 @@ const EMPTY = {
     collection_agent_name: '',
     conversion_agent_id: '',
     conversion_agent_name: '',
+    distributor_id: '',
     distributor_name: '',
     is_petty_cash: 0,
 };
@@ -447,9 +448,13 @@ export default function TransactionsPage() {
                                             )}
                                         </td>
                                         <td>{tx.client_name}</td>
-                                        <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>₹{tx.inr_requested?.toLocaleString('en-IN')}</td>
-                                        <td className={`currency ${tx.collected_currency?.toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
-                                            {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency}</span>
+                                        <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {!tx.is_petty_cash || (tx.distributor_id && tx.inr_requested) ? (
+                                                <>₹{Number(tx.inr_requested || 0).toLocaleString('en-IN')}</>
+                                            ) : '—'}
+                                        </td>
+                                        <td className={`currency ${(tx.collected_currency || 'SAR').toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency || 'SAR'}</span>
                                         </td>
                                         <td>{tx.collection_agent_name || '—'}</td>
                                         {isAdmin && (
@@ -532,9 +537,9 @@ export default function TransactionsPage() {
                                                     const val = e.target.value;
                                                     const ag = agents.find(x => x.$id === val);
                                                     if (ag?.type === 'distributor') {
-                                                        setForm({ ...form, distributor_id: val, collection_agent_id: '', distributor_name: ag.name });
+                                                        setForm({ ...form, distributor_id: val, collection_agent_id: '', distributor_name: ag.name, collected_currency: 'INR' });
                                                     } else {
-                                                        setForm({ ...form, collection_agent_id: val, distributor_id: '', collection_agent_name: ag?.name || '' });
+                                                        setForm({ ...form, collection_agent_id: val, distributor_id: '', collection_agent_name: ag?.name || '', collected_currency: ag?.currency || 'SAR' });
                                                     }
                                                 }}>
                                                 <option value="">General Petty Cash (No Ledger)</option>
@@ -557,7 +562,11 @@ export default function TransactionsPage() {
                                                 autoFocus
                                                 placeholder="Positive = They owe us, Negative = We owe them"
                                                 value={form.collected_amount}
-                                                onChange={e => setForm({ ...form, collected_amount: e.target.value, inr_requested: e.target.value })}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    const isDist = !!form.distributor_id;
+                                                    setForm({ ...form, collected_amount: val, inr_requested: isDist ? val : '' });
+                                                }}
                                                 style={{ fontSize: 24, fontWeight: 800, padding: '12px 16px' }} />
                                             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
                                                 <span>💡</span>
