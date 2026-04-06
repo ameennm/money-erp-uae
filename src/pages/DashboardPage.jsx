@@ -4,7 +4,7 @@ import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
 import {
     TrendingUp, SendHorizonal,
-    X, PiggyBank
+    Banknote, Wallet, X, PiggyBank
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
