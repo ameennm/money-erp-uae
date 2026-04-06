@@ -22,8 +22,8 @@ export const ledgerService = {
         const targetName = agent_name || agent.name;
         const targetType = agent?.type || 'collection';
 
-        // 1. Get current agent to find current balance
-        const targetAgent = agent || await dbService.getAgent(targetId);
+        // 1. ALWAYS get current agent from DB to ensure absolute latest balance
+        const targetAgent = await dbService.getAgent(targetId);
         if (!targetAgent) throw new Error(`Agent ${targetId} not found`);
 
         const balField = currency === 'INR' ? 'inr_balance' : (currency === 'SAR' ? 'sar_balance' : 'aed_balance');
@@ -66,7 +66,6 @@ export const ledgerService = {
             await this.recordEntry({
                 agent_id: entry.agent_id,
                 agent_name: entry.agent_name,
-                agent: { $id: entry.agent_id, name: entry.agent_name, type: entry.agent_type || 'collection' },
                 amount: entry.amount,
                 currency: entry.currency,
                 type: entry.type === 'credit' ? 'debit' : 'credit',
