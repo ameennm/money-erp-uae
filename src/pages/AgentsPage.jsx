@@ -105,37 +105,36 @@ export default function AgentsPage() {
         setPaymentModal(true);
     };
 
-    const handlePayment = async (e) => {
-        e.preventDefault();
+    const handleAction = async (type) => {
         const amt = round2(parseFloat(paymentAmount) || 0);
-        if (!amt || amt <= 0) return toast.error('Enter a valid payment amount');
+        if (!amt || amt <= 0) return toast.error('Enter a valid amount');
         const cur = paymentAgent.currency || 'SAR';
         setSaving(true);
         try {
-            // 1. Record payment as income expense for dashboard
+            // 1. Record as income/expense for dashboard
             const expensePayload = {
-                title: `Agent Payment — ${paymentAgent.name}`,
-                type: 'income',
-                category: 'Agent Payment',
+                title: type === 'credit' ? `Agent Payment — ${paymentAgent.name}` : `Payment to Agent — ${paymentAgent.name}`,
+                type: type === 'credit' ? 'income' : 'expense',
+                category: type === 'credit' ? 'Agent Payment' : 'Agent Advance',
                 amount: amt,
                 currency: cur,
                 date: new Date().toISOString().split('T')[0],
-                notes: `Received ${amt.toLocaleString()} ${cur} from agent ${paymentAgent.name}`,
+                notes: `${type === 'credit' ? 'Received' : 'Paid'} ${amt.toLocaleString()} ${cur} ${type === 'credit' ? 'from' : 'to'} agent ${paymentAgent.name}`,
             };
             const createdExpense = await dbService.createExpense(expensePayload);
 
             // 2. Record Ledger entry (automatically updates agent balance)
             await ledgerService.recordEntry({
                 agent: paymentAgent,
-                amount: amt, // Positive amount, ledgerService will subtract for type 'credit'
+                amount: amt,
                 currency: cur,
-                type: 'credit', // Agent paid us back (decreases debt)
+                type: type, // 'credit' decreases balance (paid us), 'debit' increases balance (we gave them)
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
-                description: `Payment received from ${paymentAgent.name}`
+                description: type === 'credit' ? `Payment received from ${paymentAgent.name}` : `Payment made to ${paymentAgent.name}`
             });
 
-            toast.success(`✅ Recorded ${amt.toLocaleString()} ${cur} received from ${paymentAgent.name}`);
+            toast.success(`✅ Success: ${amt.toLocaleString()} ${cur} recorded for ${paymentAgent.name}`);
             setPaymentModal(false);
             fetch();
         } catch (err) {
@@ -221,10 +220,10 @@ export default function AgentsPage() {
                                     <th className="hide-md">Phone</th>
                                     <th className="hide-lg">Location</th>
                                     <th className="hide-sm">Currency</th>
-                                    <th style={{ textAlign: 'right' }}>Total</th>
-                                    <th style={{ textAlign: 'right' }}>Paid</th>
-                                    <th style={{ textAlign: 'right' }}>Balance</th>
-                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                    <th style={{ textAlign: 'right' }}>Total Coll.</th>
+                                    <th style={{ textAlign: 'right' }}>Total Paid</th>
+                                    <th style={{ textAlign: 'right', width: 200 }}>Balance Status</th>
+                                    <th style={{ textAlign: 'right', width: 140 }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -421,71 +420,77 @@ export default function AgentsPage() {
                 const amt = parseFloat(paymentAmount) || 0;
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPaymentModal(false)}>
-                        <div className="modal">
+                        <div className="modal" style={{ maxWidth: 500, width: '95%' }}>
                             <div className="modal-header">
                                 <div>
-                                    <h3 className="modal-title">Receive Payment — {paymentAgent.name}</h3>
+                                    <h3 className="modal-title">Agent Money Ops</h3>
                                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                                        Record {cur} cash received from this agent
+                                        Manage {cur} funds for {paymentAgent.name}
                                     </div>
                                 </div>
                                 <button className="close-btn" onClick={() => setPaymentModal(false)}><X size={20} /></button>
                             </div>
-                            <form onSubmit={handlePayment}>
-                                <div className="modal-body">
-                                    {/* Owed Summary */}
-                                    <div className="card" style={{ background: 'var(--bg-main)', padding: 16, marginBottom: 16, border: `1px solid ${cur === 'AED' ? 'rgba(245,166,35,0.25)' : 'rgba(74,158,255,0.25)'}` }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Agent Owes Us:</span>
-                                            <span style={{ fontSize: 22, fontWeight: 800, color: cur === 'AED' ? 'var(--brand-gold)' : '#4a9eff' }}>
-                                                {owed.toLocaleString()} {cur}
-                                            </span>
+                            <div className="modal-body">
+                                {/* Owed Summary */}
+                                <div className="card" style={{ background: 'var(--bg-main)', padding: 16, marginBottom: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{paymentAgent.name} Status:</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontWeight: 800, color: (Number(paymentAgent[owedField]) || 0) >= 0 ? '#4a9eff' : 'var(--brand-accent)' }}>
+                                                {(Number(paymentAgent[owedField]) || 0).toLocaleString()} {cur}
+                                            </div>
+                                            <div style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>
+                                                {owed >= 0 ? 'They owe us' : 'Agent Credit'}
+                                            </div>
                                         </div>
                                     </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Amount Received ({cur})</label>
-                                        <input
-                                            className="form-input"
-                                            type="number"
-                                            step="0.01"
-                                            min="0.01"
-                                            max={owed}
-                                            required
-                                            autoFocus
-                                            placeholder={`Max ${owed.toLocaleString()} ${cur}`}
-                                            value={paymentAmount}
-                                            onChange={e => setPaymentAmount(e.target.value)}
-                                            style={{ fontSize: 20, fontWeight: 700, height: 52 }}
-                                        />
-                                        {amt > 0 && amt <= owed && (
-                                            <div style={{ fontSize: 12, color: 'var(--brand-accent)', marginTop: 6 }}>
-                                                ✓ Remaining after this payment: <strong>{round2(owed - amt).toLocaleString()} {cur}</strong>
-                                            </div>
-                                        )}
-                                        {amt > owed && (
-                                            <div style={{ fontSize: 12, color: 'var(--status-failed)', marginTop: 6 }}>
-                                                ⚠️ Cannot exceed owed amount ({owed.toLocaleString()} {cur})
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <div style={{ padding: '10px 14px', background: 'rgba(0,200,150,0.06)', borderRadius: 8, border: '1px solid rgba(0,200,150,0.2)', fontSize: 13, color: 'var(--text-secondary)' }}>
-                                        💡 This will be recorded as <strong>{cur} income</strong>, increasing our {cur} balance on the dashboard.
-                                    </div>
                                 </div>
-                                <div className="modal-footer">
-                                    <button type="button" className="btn btn-outline" onClick={() => setPaymentModal(false)}>Cancel</button>
+
+                                <div className="form-group">
+                                    <label className="form-label">Amount ({cur})</label>
+                                    <input
+                                        className="form-input"
+                                        type="number"
+                                        step="0.01"
+                                        required
+                                        autoFocus
+                                        placeholder="Enter amount..."
+                                        value={paymentAmount}
+                                        onChange={e => setPaymentAmount(e.target.value)}
+                                        style={{ fontSize: 22, fontWeight: 700, height: 55 }}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 24 }}>
                                     <button
-                                        type="submit"
-                                        className="btn btn-accent"
-                                        disabled={saving || !paymentAmount || amt <= 0 || amt > owed + 0.01}
-                                        style={{ minWidth: 160 }}
+                                        type="button"
+                                        className="btn"
+                                        style={{ flex: '1 1 200px', background: '#25D366', color: '#fff', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                        disabled={saving}
+                                        onClick={() => handleAction('credit')}
                                     >
-                                        {saving ? 'Saving…' : `✅ Confirm Receipt`}
+                                        <div style={{ fontSize: 14 }}>Receive from Agent</div>
+                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Payment / Advance</div>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn"
+                                        style={{ flex: '1 1 200px', background: 'var(--brand-primary)', color: '#fff', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                        disabled={saving}
+                                        onClick={() => handleAction('debit')}
+                                    >
+                                        <div style={{ fontSize: 14 }}>Pay to Agent</div>
+                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Give cash to agent</div>
                                     </button>
                                 </div>
-                            </form>
+
+                                <div style={{ marginTop: 20, padding: '10px 14px', background: 'rgba(74,158,255,0.06)', borderRadius: 8, border: '1px solid rgba(74,158,255,0.2)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                                    💡 <b>Receive from Agent</b> decreases their debt or increases their credit. <b>Pay to Agent</b> does the opposite.
+                                </div>
+                            </div>
+                            <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+                                <button type="button" className="btn btn-outline w-full" onClick={() => setPaymentModal(false)}>Close</button>
+                            </div>
                         </div>
                     </div>
                 );

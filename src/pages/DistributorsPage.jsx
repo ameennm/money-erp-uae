@@ -62,32 +62,33 @@ export default function DistributorsPage() {
     const inrDeposited = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
     const availableINR = Math.max(0, round2(inrIncome - inrGeneralExp - inrDeposited));
 
-    const handleDeposit = async (e) => {
-        e.preventDefault();
+    const handleAction = async (type) => {
         setSaving(true);
         try {
             const amt = Number(depositAmount);
             if (!amt || amt <= 0) {
                 setSaving(false);
-                return toast.error('Enter a valid deposit amount');
+                return toast.error('Enter a valid amount');
             }
-            if (amt > availableINR) {
+
+            // Pay to Distributor (Debit) - takes from pool
+            if (type === 'debit' && amt > availableINR) {
                 setSaving(false);
                 return toast.error(
-                    `Insufficient INR! Only ₹${(availableINR || 0).toLocaleString('en-IN')} available. Cannot deposit ₹${(amt || 0).toLocaleString('en-IN')}.`,
+                    `Insufficient INR! Only ₹${(availableINR || 0).toLocaleString('en-IN')} available. Cannot pay ₹${(amt || 0).toLocaleString('en-IN')}.`,
                     { duration: 5000 }
                 );
             }
 
-            // 1. Record as INR expense (deducts from undistributed pool)
+            // 1. Record as INR expense/income for pool audit
             const expense = await dbService.createExpense({
-                title: `Deposit to ${editItem.name}`,
-                type: 'expense',
-                category: 'Distributor Deposit',
+                title: type === 'debit' ? `Payment to ${editItem.name}` : `Receipt from ${editItem.name}`,
+                type: type === 'debit' ? 'expense' : 'income',
+                category: type === 'debit' ? 'Distributor Payment' : 'Distributor Receipt',
                 amount: round2(amt),
                 currency: 'INR',
                 date: new Date().toISOString().split('T')[0],
-                notes: depositNote || `Deposited ₹${(amt || 0).toLocaleString('en-IN')} to ${editItem.name}`,
+                notes: depositNote || `${type === 'debit' ? 'Paid' : 'Received'} ₹${(amt || 0).toLocaleString('en-IN')} ${type === 'debit' ? 'to' : 'from'} ${editItem.name}`,
                 distributor_id: editItem.$id,
                 distributor_name: editItem.name
             });
@@ -97,16 +98,16 @@ export default function DistributorsPage() {
                 agent: editItem,
                 amount: amt,
                 currency: 'INR',
-                type: 'debit', // Distributor received money from us
+                type: type, // 'debit' increases balance, 'credit' decreases it
                 reference_type: 'expense',
                 reference_id: expense.$id,
-                description: depositNote || `Deposit of ₹${(amt || 0).toLocaleString('en-IN')}`
+                description: depositNote || `${type === 'debit' ? 'Paid' : 'Received'} ₹${(amt || 0).toLocaleString('en-IN')}`
             });
 
-            toast.success(`₹${(amt || 0).toLocaleString('en-IN')} deposited to ${editItem.name}`);
+            toast.success(`Success! ₹${(amt || 0).toLocaleString('en-IN')} recorded for ${editItem.name}`);
             setDepositModal(false);
             fetchAll(); 
-        } catch (e) { toast.error('Deposit failed: ' + e.message); }
+        } catch (e) { toast.error('Action failed: ' + e.message); }
         finally { setSaving(false); }
     };
 
@@ -263,9 +264,9 @@ export default function DistributorsPage() {
                                     <th className="hide-md" style={{ width: 140 }}>Phone</th>
                                     <th className="hide-sm" style={{ width: 80 }}>Txs</th>
                                     <th style={{ textAlign: 'right', width: 160 }}>Total Distributed</th>
-                                    <th style={{ textAlign: 'right', width: 160 }}>Available Balance</th>
+                                    <th style={{ textAlign: 'right', width: 220 }}>Balance Status</th>
                                     <th className="hide-lg">Notes</th>
-                                    <th style={{ textAlign: 'right', width: 180 }}>Actions</th>
+                                    <th style={{ textAlign: 'right', width: 240 }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -305,14 +306,21 @@ export default function DistributorsPage() {
                                              <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{dist.phone || '—'}</td>
                                              <td className="hide-sm">{distTxs.length} txs</td>
                                              <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{(totalINR || 0).toLocaleString('en-IN')}</td>
-                                             <td style={{ fontWeight: 700, textAlign: 'right', color: 'var(--text-primary)' }}>
-                                                 ₹{Math.abs(Number(dist.inr_balance || 0)).toLocaleString('en-IN')}
+                                             <td style={{ fontWeight: 700, textAlign: 'right' }}>
+                                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                                     <div style={{ color: Number(dist.inr_balance) >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)', fontSize: '15px' }}>
+                                                         ₹{(Number(dist.inr_balance) || 0).toLocaleString('en-IN')}
+                                                     </div>
+                                                     <div style={{ fontSize: '10px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                         {Number(dist.inr_balance) >= 0 ? 'They owe us' : 'We owe them (Pocket)'}
+                                                     </div>
+                                                 </div>
                                              </td>
                                              <td style={{ color: 'var(--text-muted)', fontSize: '13px' }} className="hide-lg">{dist.notes || '—'}</td>
                                              <td style={{ textAlign: 'right' }}>
                                                  <div className="flex gap-2 justify-end">
-                                                    <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)}>
-                                                        Deposit
+                                                    <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)} style={{ padding: '4px 10px', fontSize: 12 }}>
+                                                        Money Ops
                                                     </button>
                                                     <button
                                                         className="btn btn-outline btn-sm"
@@ -416,49 +424,79 @@ export default function DistributorsPage() {
             {/* Deposit Modal */}
             {depositModal && editItem && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDepositModal(false)}>
-                    <div className="modal">
+                    <div className="modal" style={{ maxWidth: 500, width: '95%' }}>
                         <div className="modal-header">
-                            <h3 className="modal-title">Deposit INR to {editItem.name}</h3>
+                            <div>
+                                <h3 className="modal-title">Distributor Money Ops</h3>
+                                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage funds for {editItem.name}</div>
+                            </div>
                             <button className="close-btn" onClick={() => setDepositModal(false)}><X size={20} /></button>
                         </div>
-                        <form onSubmit={handleDeposit}>
-                            <div className="modal-body">
-                                <div className="card mb-4" style={{ background: 'var(--bg-main)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                                        <span style={{ color: 'var(--text-muted)' }}>Available INR (Not Given):</span>
-                                        <span style={{ fontWeight: 800, color: availableINR > 0 ? '#a78bfa' : 'var(--status-failed)' }}>
-                                            ₹{(availableINR || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <span style={{ color: 'var(--text-muted)' }}>Current Balance ({editItem.name}):</span>
-                                        <span style={{ fontWeight: 700, color: 'var(--brand-accent)' }}>
-                                            ₹{(Number(editItem.inr_balance) || 0).toLocaleString('en-IN')}
-                                        </span>
-                                    </div>
+                        <div className="modal-body">
+                            <div className="card mb-4" style={{ background: 'var(--bg-main)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Our Available INR:</span>
+                                    <span style={{ fontWeight: 800, color: availableINR > 0 ? '#a78bfa' : 'var(--status-failed)' }}>
+                                        ₹{(availableINR || 0).toLocaleString('en-IN')}
+                                    </span>
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Deposit Amount (INR)</label>
-                                    <input className="form-input" type="number" required placeholder="e.g. 50000"
-                                        max={availableINR}
-                                        value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
-                                    {depositAmount && Number(depositAmount) > availableINR && (
-                                        <div style={{ color: 'var(--status-failed)', fontSize: 12, marginTop: 6 }}>
-                                            ⚠️ Amount exceeds available INR (₹{(availableINR || 0).toLocaleString('en-IN')})
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Current {editItem.name} Status:</span>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div style={{ fontWeight: 800, color: Number(editItem.inr_balance) >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)' }}>
+                                            {Number(editItem.inr_balance) < 0 ? '-' : ''}₹{Math.abs(Number(editItem.inr_balance) || 0).toLocaleString('en-IN')}
                                         </div>
-                                    )}
-                                </div>
-                                <div className="form-group" style={{ marginTop: 16 }}>
-                                    <label className="form-label">Notes</label>
-                                    <textarea className="form-textarea" placeholder="Additional details..."
-                                        value={depositNote} onChange={e => setDepositNote(e.target.value)} />
+                                        <div style={{ fontSize: 9, textTransform: 'uppercase', opacity: 0.8 }}>
+                                            {Number(editItem.inr_balance) >= 0 ? 'They owe us' : 'We owe them'}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="modal-footer">
-                                <button type="button" className="btn btn-outline" onClick={() => setDepositModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving || availableINR <= 0}>Confirm Deposit</button>
+
+                            <div className="form-group">
+                                <label className="form-label">Amount (INR)</label>
+                                <input className="form-input" type="number" required placeholder="e.g. 50000"
+                                    style={{ fontSize: 22, fontWeight: 700, height: 55 }}
+                                    value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
                             </div>
-                        </form>
+
+                            <div className="form-group" style={{ marginTop: 16 }}>
+                                <label className="form-label">Notes (Optional)</label>
+                                <textarea className="form-textarea" placeholder="Reason for payment/receipt..."
+                                    value={depositNote} onChange={e => setDepositNote(e.target.value)} />
+                            </div>
+
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 24 }}>
+                                <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ flex: '1 1 200px', background: 'var(--brand-primary)', color: '#fff', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                    disabled={saving || (Number(depositAmount) > availableINR)}
+                                    onClick={() => handleAction('debit')}
+                                >
+                                    <div style={{ fontSize: 14 }}>Pay to Dist.</div>
+                                    <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Takes from our INR pool</div>
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ flex: '1 1 200px', background: 'var(--brand-gold)', color: '#000', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                    disabled={saving}
+                                    onClick={() => handleAction('credit')}
+                                >
+                                    <div style={{ fontSize: 14 }}>Receive from Dist.</div>
+                                    <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Inc. pocket money / Return</div>
+                                </button>
+                            </div>
+                            {depositAmount && Number(depositAmount) > availableINR && (
+                                <div style={{ color: 'var(--status-failed)', fontSize: 11, marginTop: 10, textAlign: 'center' }}>
+                                    ⚠️ Cannot pay more than available INR (₹{(availableINR || 0).toLocaleString('en-IN')})
+                                </div>
+                            )}
+                        </div>
+                        <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+                            <button type="button" className="btn btn-outline w-full" onClick={() => setDepositModal(false)}>Close</button>
+                        </div>
                     </div>
                 </div>
             )}

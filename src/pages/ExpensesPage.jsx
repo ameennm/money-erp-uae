@@ -47,12 +47,8 @@ export default function ExpensesPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const [r, ar] = await Promise.all([
-                dbService.listExpenses(),
-                dbService.listAgents(),
-            ]);
+            const r = await dbService.listExpenses();
             setExpenses(r.documents);
-            setAgents(ar.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -100,25 +96,10 @@ export default function ExpensesPage() {
         try {
             const amt = parseFloat(form.amount) || 0;
             const payload = { ...form, amount: amt };
-            const selectedAgent = agents.find(a => a.$id === form.distributor_id);
-            payload.distributor_name = selectedAgent ? selectedAgent.name : '';
-
+            
+            // Note: Balance-affecting entries (Distributors/Agents) 
+            // are now handled via their specific pages for better audit trails.
             const created = await dbService.createExpense(payload);
-
-            const isDeposit = form.category?.includes('Deposit') || form.category === 'Capital Injection';
-            const ledgerType = isDeposit ? 'debit' : 'credit';
-
-            if (selectedAgent) {
-                await ledgerService.recordEntry({
-                    agent: selectedAgent,
-                    amount: amt,
-                    currency: form.currency || 'SAR',
-                    type: ledgerType,
-                    reference_type: 'expense',
-                    reference_id: created.$id,
-                    description: `${form.type === 'income' ? 'Income' : 'Expense'}: ${form.title} (${form.category})`
-                });
-            }
 
             toast.success('Record saved');
             setModal(false);
@@ -160,18 +141,6 @@ export default function ExpensesPage() {
         XLSX.writeFile(wb, `income_ops_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     };
 
-    const getAvailableAgents = () => {
-        if (form.currency === 'AED') {
-            return agents.filter(a => (a.type === 'collection' && a.currency === 'AED') || a.type === 'conversion_aed');
-        }
-        if (form.currency === 'SAR') {
-            return agents.filter(a => (a.type === 'collection' && a.currency === 'SAR') || a.type === 'conversion_sar');
-        }
-        if (form.currency === 'INR') {
-            return agents.filter(a => a.type === 'distributor');
-        }
-        return [];
-    };
 
     const resetFilters = () => {
         setSearch('');
@@ -374,23 +343,6 @@ export default function ExpensesPage() {
                                     </div>
                                 </div>
 
-                                <div className="form-group">
-                                    <label className="form-label">
-                                        {form.currency === 'INR' ? 'Distributor' : 'Agent / Conversion Agent'}
-                                    </label>
-                                    <select
-                                        className="form-select"
-                                        value={form.distributor_id}
-                                        onChange={e => setForm({ ...form, distributor_id: e.target.value })}
-                                    >
-                                        <option value="">— Select {form.currency === 'INR' ? 'Distributor' : 'Agent'} —</option>
-                                        {getAvailableAgents().map(a => (
-                                            <option key={a.$id} value={a.$id}>
-                                                {a.name} ({a.type.replace('_', ' ')})
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
 
                                 <div className="form-row">
                                     <div className="form-group">

@@ -115,8 +115,7 @@ export default function ConversionAgentsPage() {
         } catch (e) { toast.error(e.message); }
     };
 
-    const handleDepositSubmit = async (e) => {
-        e.preventDefault();
+    const handleActionSubmit = async (type) => {
         setSaving(true);
         try {
             const amtIn = Number(actionAmount);
@@ -124,15 +123,15 @@ export default function ConversionAgentsPage() {
 
             const balCur = activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED';
             
-            // 1. Create expense for dashboard
+            // 1. Create expense/income for dashboard pool audit
             const expensePayload = {
-                title: `Deposit to Conv. Agent — ${activeAgent.name}`,
-                type: 'expense',
-                category: 'Conversion Deposit',
+                title: type === 'debit' ? `Given to Conv. Agent — ${activeAgent.name}` : `Returned from Conv. Agent — ${activeAgent.name}`,
+                type: type === 'debit' ? 'expense' : 'income',
+                category: 'Conversion Fund Ops',
                 amount: amtIn,
                 currency: balCur,
                 date: new Date().toISOString().split('T')[0],
-                notes: depositNote || `Deposited ${amtIn} ${balCur}.`,
+                notes: depositNote || `${type === 'debit' ? 'Given' : 'Received'} ${amtIn} ${balCur} ${type === 'debit' ? 'to' : 'from'} ${activeAgent.name}.`,
                 distributor_id: activeAgent.$id,
                 distributor_name: activeAgent.name
             };
@@ -143,13 +142,13 @@ export default function ConversionAgentsPage() {
                 agent: activeAgent,
                 amount: amtIn,
                 currency: balCur,
-                type: 'debit', // Agent received money from us
+                type: type, // 'debit' increases debt to us, 'credit' decreases it
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
-                description: `Deposit to conversion agent: ${activeAgent.name}`
+                description: depositNote || `${type === 'debit' ? 'Money given' : 'Money returned'} (${balCur})`
             });
 
-            toast.success(`Deposited ${amtIn} ${balCur}`);
+            toast.success(`✅ Success: ${amtIn} ${balCur} recorded`);
             setDepositModal(false);
             fetchAll();
         } catch (err) {
@@ -290,8 +289,8 @@ export default function ConversionAgentsPage() {
                                     <th style={{ width: 40 }}>#</th>
                                     <th>Agent Name</th>
                                     <th className="hide-md" style={{ width: 140 }}>Phone</th>
-                                    <th style={{ textAlign: 'right', width: 150 }}>Balance</th>
-                                    <th style={{ textAlign: 'center', width: 180 }} className="hide-sm">Operations</th>
+                                    <th style={{ textAlign: 'right', width: 220 }}>Balance Status</th>
+                                    <th style={{ textAlign: 'center', width: 220 }} className="hide-sm">Operations</th>
                                     <th style={{ textAlign: 'right', width: 120 }}>Actions</th>
                                 </tr>
                             </thead>
@@ -325,15 +324,22 @@ export default function ConversionAgentsPage() {
                                                 {a.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.notes}</div>}
                                             </td>
                                             <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                                {(bal || 0).toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
-                                            </td>
-                                            <td style={{ textAlign: 'center' }}>
-                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                    <button className="btn btn-danger btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Deposit</button>
-                                                    <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Receive</button>
-                                                </div>
-                                            </td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                                     <div style={{ color: Number(bal) >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)', fontSize: '15px' }}>
+                                                         {bal.toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
+                                                     </div>
+                                                     <div style={{ fontSize: '9px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                         {Number(bal) >= 0 ? 'They owe us' : 'We owe them (Pocket)'}
+                                                     </div>
+                                                 </div>
+                                             </td>
+                                             <td style={{ textAlign: 'center' }}>
+                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                     <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Money Ops</button>
+                                                     <button className="btn btn-outline btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Settle</button>
+                                                 </div>
+                                             </td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                                                     <button className="btn btn-outline btn-sm btn-icon" title="View History" onClick={() => setViewingAgent(a)}><List size={13} /></button>
@@ -448,37 +454,68 @@ export default function ConversionAgentsPage() {
             {/* Deposit Modal */}
             {depositModal && activeAgent && (() => {
                 const balCur = activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED';
+                const bal = activeAgent.type === 'conversion_sar' ? (activeAgent.sar_balance || 0) : (activeAgent.aed_balance || 0);
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDepositModal(false)}>
-                        <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
-                            <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Deposit to {activeAgent.name}</h3>
-                                <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setDepositModal(false)}><X size={20} /></button>
+                        <div className="modal" style={{ maxWidth: 500, width: '95%' }}>
+                            <div className="modal-header">
+                                <div>
+                                    <h3 className="modal-title">Conv. Agent Money Ops</h3>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage {balCur} for {activeAgent.name}</div>
+                                </div>
+                                <button className="close-btn" onClick={() => setDepositModal(false)}><X size={20} /></button>
                             </div>
-                            <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleDepositSubmit}>
-                                <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Current Debt (Balance):</span>
-                                    <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? '#4a9eff' : 'var(--brand-gold)' }}>
-                                        {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.sar_balance) || 0).toLocaleString()} SAR` : `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED`}
-                                    </span>
+                            <div className="modal-body">
+                                <div className="card mb-4" style={{ background: 'var(--bg-main)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{activeAgent.name} Status:</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontSize: 18, fontWeight: 800, color: bal >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)' }}>
+                                                {bal.toLocaleString()} {balCur}
+                                            </div>
+                                            <div style={{ fontSize: 9, opacity: 0.8, textTransform: 'uppercase' }}>
+                                                {bal >= 0 ? 'They owe us' : 'We owe them'}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div className="form-group">
-                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Deposit Amount ({balCur})</label>
-                                    <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                    <label className="form-label">Amount ({balCur})</label>
+                                    <input className="form-input" style={{ fontSize: 22, fontWeight: 700, height: 55 }} type="number" step="any" required
                                         value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Notes</label>
-                                    <textarea className="form-textarea" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} rows="3" placeholder="Additional details..."
+                                <div className="form-group" style={{ marginTop: 16 }}>
+                                    <label className="form-label">Notes (Optional)</label>
+                                    <textarea className="form-textarea" rows="2" placeholder="Details..."
                                         value={depositNote} onChange={e => setDepositNote(e.target.value)} />
                                 </div>
-                                <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                                    <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setDepositModal(false)}>Cancel</button>
-                                    <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
-                                        {saving ? 'Processing...' : 'Confirm Deposit'}
+
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 24 }}>
+                                    <button
+                                        type="button"
+                                        className="btn"
+                                        style={{ flex: '1 1 200px', background: 'var(--brand-primary)', color: '#fff', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                        disabled={saving}
+                                        onClick={() => handleActionSubmit('debit')}
+                                    >
+                                        <div style={{ fontSize: 14 }}>Give {balCur}</div>
+                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>To convert later</div>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn"
+                                        style={{ flex: '1 1 200px', background: 'var(--brand-gold)', color: '#000', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
+                                        disabled={saving}
+                                        onClick={() => handleActionSubmit('credit')}
+                                    >
+                                        <div style={{ fontSize: 14 }}>Receive {balCur}</div>
+                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Return / Pocket</div>
                                     </button>
                                 </div>
-                            </form>
+                            </div>
+                            <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+                                <button type="button" className="btn btn-outline w-full" onClick={() => setDepositModal(false)}>Close</button>
+                            </div>
                         </div>
                     </div>
                 );
