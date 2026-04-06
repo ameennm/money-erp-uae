@@ -81,17 +81,14 @@ export default function DashboardPage() {
                 {/* INR Cards */}
                 <Card label="INR Debit" value={inr.debit} cur="₹" color="#a78bfa" icon={<TrendingUp size={20} />} />
                 <Card label="INR Credit" value={inr.credit} cur="₹" color="#ef4444" icon={<SendHorizonal size={20} />} />
-                <Card label="INR Balance in Hand" value={inr.balance} cur="₹" color="var(--brand-accent)" icon={<Wallet size={20} />} />
 
                 {/* SAR Cards */}
                 <Card label="SAR Debit" value={sar.debit} cur="SAR" color="#4a9eff" icon={<TrendingUp size={20} />} />
                 <Card label="SAR Credit" value={sar.credit} cur="SAR" color="#ef4444" icon={<SendHorizonal size={20} />} />
-                <Card label="SAR Balance in Hand" value={sar.balance} cur="SAR" color="var(--brand-gold)" icon={<Banknote size={20} />} />
 
                 {/* AED Cards */}
                 <Card label="AED Debit" value={aed.debit} cur="AED" color="#22c55e" icon={<TrendingUp size={20} />} />
                 <Card label="AED Credit" value={aed.credit} cur="AED" color="#ef4444" icon={<SendHorizonal size={20} />} />
-                <Card label="AED Balance in Hand" value={aed.balance} cur="AED" color="#f5a623" icon={<PiggyBank size={20} />} />
             </div>
 
         </Layout>
