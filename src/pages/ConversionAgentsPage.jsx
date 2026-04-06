@@ -5,10 +5,9 @@ import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
 import {
-    Plus, X, Pencil, Trash2, RefreshCw, List
+    Plus, X, Pencil, Trash2, RefreshCw, List, Banknote
 } from 'lucide-react';
 import { SearchInput } from '../components/filters';
-
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED', sar_balance: 0, aed_balance: 0 };
 const CONV_TYPES = [
@@ -18,7 +17,7 @@ const CONV_TYPES = [
 
 export default function ConversionAgentsPage() {
     const [agents, setAgents] = useState([]);
-    const [convRecs, setConvRecs] = useState([]);   // AED conversion records
+    const [convRecs, setConvRecs] = useState([]);   
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -27,7 +26,6 @@ export default function ConversionAgentsPage() {
     const [saving, setSaving] = useState(false);
     const [activeTab, setActiveTab] = useState('conversion_sar');
 
-    // Deposit / Receive State
     const [depositModal, setDepositModal] = useState(false);
     const [receiveModal, setReceiveModal] = useState(false);
     const [activeAgent, setActiveAgent] = useState(null);
@@ -36,7 +34,6 @@ export default function ConversionAgentsPage() {
     const [depositNote, setDepositNote] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [user, setUser] = useState(null);
-
 
     const fetchAll = async () => {
         setLoading(true);
@@ -50,11 +47,11 @@ export default function ConversionAgentsPage() {
         } catch (e) { toast.error(e.message); }
         finally { setLoading(false); }
     };
+
     useEffect(() => {
         fetchAll();
         authService.getCurrentUser().then(setUser);
     }, []);
-
 
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (a) => {
@@ -70,6 +67,7 @@ export default function ConversionAgentsPage() {
         });
         setModal(true);
     };
+
     const openDeposit = (a) => {
         setActiveAgent(a);
         setActionAmount('');
@@ -85,13 +83,11 @@ export default function ConversionAgentsPage() {
             if (editItem) {
                 await dbService.updateAgent(editItem.$id, form);
                 toast.success('Updated');
-                // Optimistic: update in state
-                setAgents(prev => prev.map(a => a.$id === editItem.$id ? { ...a, ...form } : a));
+                fetchAll();
             } else {
-                const created = await dbService.createAgent(form);
+                await dbService.createAgent(form);
                 toast.success('Conversion agent added');
-                // Optimistic: prepend new agent
-                setAgents(prev => [{ ...created, ...form }, ...prev]);
+                fetchAll();
             }
             setModal(false);
         } catch (e) { toast.error(e.message); }
@@ -101,17 +97,14 @@ export default function ConversionAgentsPage() {
     const handleDelete = async (agent) => {
         const agentRecs = convRecs.filter(r => r.conversion_agent_id === agent.$id);
         const msg = agentRecs.length > 0
-            ? `Delete "${agent.name}"? This will also delete ${agentRecs.length} conversion record(s) from the dashboard. This cannot be undone.`
+            ? `Delete "${agent.name}"? This will also delete ${agentRecs.length} conversion record(s).`
             : `Delete conversion agent "${agent.name}"?`;
         if (!window.confirm(msg)) return;
         try {
-            // Delete all AED conversion records for this agent first
             await Promise.all(agentRecs.map(r => dbService.deleteAedConversion(r.$id)));
             await dbService.deleteAgent(agent.$id);
-            toast.success(`Deleted agent + ${agentRecs.length} conversion record(s)`);
-            // Optimistic: remove from state
-            setAgents(prev => prev.filter(a => a.$id !== agent.$id));
-            setConvRecs(prev => prev.filter(r => r.conversion_agent_id !== agent.$id));
+            toast.success(`Deleted agent`);
+            fetchAll();
         } catch (e) { toast.error(e.message); }
     };
 
@@ -123,7 +116,6 @@ export default function ConversionAgentsPage() {
 
             const balCur = activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED';
             
-            // 1. Create expense/income for dashboard pool audit
             const expensePayload = {
                 title: type === 'debit' ? `Given to Conv. Agent — ${activeAgent.name}` : `Returned from Conv. Agent — ${activeAgent.name}`,
                 type: type === 'debit' ? 'expense' : 'income',
@@ -137,12 +129,11 @@ export default function ConversionAgentsPage() {
             };
             const createdExpense = await dbService.createExpense(expensePayload);
 
-            // 2. Record Ledger entry (updates agent balance)
             await ledgerService.recordEntry({
                 agent: activeAgent,
                 amount: amtIn,
                 currency: balCur,
-                type: type, // 'debit' increases debt to us, 'credit' decreases it
+                type: type, 
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: depositNote || `${type === 'debit' ? 'Money given' : 'Money returned'} (${balCur})`
@@ -178,7 +169,6 @@ export default function ConversionAgentsPage() {
                 targetAmt = amtSource * rate;
             }
 
-            // 1. Create income expense for dashboard
             const expensePayload = {
                 title: `Receipt from Conv. Agent — ${activeAgent.name}`,
                 type: 'income',
@@ -192,12 +182,11 @@ export default function ConversionAgentsPage() {
             };
             const createdExpense = await dbService.createExpense(expensePayload);
 
-            // 2. Record Ledger entry (updates agent balance)
             await ledgerService.recordEntry({
                 agent: activeAgent,
                 amount: amtSource,
                 currency: balCur,
-                type: 'credit', // Agent gave us money back
+                type: 'credit', 
                 reference_type: 'expense',
                 reference_id: createdExpense.$id,
                 description: `Receipt from conversion agent: ${activeAgent.name}`
@@ -211,12 +200,28 @@ export default function ConversionAgentsPage() {
         } finally {
             setSaving(false);
         }
-}
+    };
+
+    // ── Business Perspective Summary ──
+    const currentAgents = agents.filter(a => a.type === activeTab);
+    const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
+    
+    const debits = currentAgents.reduce((s, a) => {
+        const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
+        return s + Math.max(0, bal);
+    }, 0);
+    const credits = currentAgents.reduce((s, a) => {
+        const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
+        return s + Math.abs(Math.min(0, bal));
+    }, 0);
+    const netBal = debits - credits;
+
     return (
         <Layout title="Conversion Agents">
-            <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                    These agents convert <strong>SAR → AED</strong> or <strong>AED → INR</strong> for us. Select one when recording a conversion on the Dashboard.
+            <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8, opacity: 0.8 }}>
+                    These agents handle currency flow for the business. 
+                    <strong> Debit</strong> = Owed to Business | <strong>Credit</strong> = Business owes them.
                 </div>
             </div>
 
@@ -232,7 +237,7 @@ export default function ConversionAgentsPage() {
                         style={{ maxWidth: '300px' }}
                     />
                 </div>
-                <button id="new-conv-agent-btn" className="btn btn-accent" onClick={openNew}>
+                <button className="btn btn-accent" onClick={openNew}>
                     <Plus size={16} /> Add Conversion Agent
                 </button>
             </div>
@@ -245,132 +250,131 @@ export default function ConversionAgentsPage() {
                     <p>No conversion agents yet. Add one to get started.</p>
                 </div>
             ) : (
-                <div className="card">
-                    <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'center' }}>
-                        <div className="flex gap-4">
-                            <button
-                                style={{
-                                    fontSize: 18,
-                                    padding: '10px 28px',
-                                    borderRadius: '12px',
-                                    border: activeTab === 'conversion_sar' ? '1px solid var(--brand-accent)' : '1px solid var(--border-color)',
-                                    background: activeTab === 'conversion_sar' ? 'var(--brand-accent)' : 'rgba(255,255,255,0.05)',
-                                    color: '#fff',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onClick={() => setActiveTab('conversion_sar')}
-                            >
-                                SAR → AED Agents
-                            </button>
-                            <button
-                                style={{
-                                    fontSize: 18,
-                                    padding: '10px 28px',
-                                    borderRadius: '12px',
-                                    border: activeTab === 'conversion_aed' ? '1px solid var(--brand-accent)' : '1px solid var(--border-color)',
-                                    background: activeTab === 'conversion_aed' ? 'var(--brand-accent)' : 'rgba(255,255,255,0.05)',
-                                    color: '#fff',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onClick={() => setActiveTab('conversion_aed')}
-                            >
-                                AED → INR Agents
-                            </button>
+                <>
+                    {/* Business Ledger Summary */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 24 }}>
+                        <div className="card" style={{ padding: '16px 20px', background: 'rgba(74,158,255,0.08)', border: '1px solid rgba(74,158,255,0.2)' }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Debit ({balCur})</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: '#4a9eff' }}>{debits.toLocaleString()}</div>
+                        </div>
+                        <div className="card" style={{ padding: '16px 20px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Credit ({balCur})</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: '#ef4444' }}>{credits.toLocaleString()}</div>
+                        </div>
+                        <div className="card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Net Exposure ({balCur})</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: netBal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>{netBal.toLocaleString()}</div>
                         </div>
                     </div>
-                    <div className="table-wrapper">
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th style={{ width: 40 }}>#</th>
-                                    <th>Agent Name</th>
-                                    <th className="hide-md" style={{ width: 140 }}>Phone</th>
-                                    <th style={{ textAlign: 'right', width: 220 }}>Balance Status</th>
-                                    <th style={{ textAlign: 'center', width: 220 }} className="hide-sm">Operations</th>
-                                    <th style={{ textAlign: 'right', width: 120 }}>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {agents
-                                    .filter(a => a.type === activeTab)
-                                    .filter(a => 
-                                        a.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                        a.phone?.toLowerCase().includes(searchTerm.toLowerCase())
-                                    )
-                                    .map((a, i) => {
-                                    const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
-                                    const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
 
-                                    return (
-                                        <tr key={a.$id}>
-                                            <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                                            <td>
-                                                <div style={{ fontWeight: 600 }}>
-                                                    <button
-                                                        onClick={() => setViewingAgent(a)}
-                                                        style={{
-                                                            background: 'none', border: 'none', padding: 0,
-                                                            fontWeight: 'inherit', cursor: 'pointer',
-                                                            textDecoration: 'underline', color: 'var(--brand-accent)'
-                                                        }}
-                                                    >
-                                                        {a.name}
-                                                    </button>
-                                                </div>
-                                                {a.notes && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.notes}</div>}
-                                            </td>
-                                            <td style={{ color: 'var(--text-muted)' }}>{a.phone || '—'}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                                     <div style={{ color: Number(bal) >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)', fontSize: '15px' }}>
-                                                         {bal.toLocaleString()} <span style={{ fontSize: 11 }}>{balCur}</span>
-                                                     </div>
-                                                     <div style={{ fontSize: '9px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                                         {Number(bal) >= 0 ? 'They owe us' : 'We owe them (Pocket)'}
-                                                     </div>
-                                                 </div>
-                                             </td>
-                                             <td style={{ textAlign: 'center' }}>
-                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                     <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Money Ops</button>
-                                                     <button className="btn btn-outline btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Settle</button>
-                                                 </div>
-                                             </td>
-                                            <td>
-                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                                                    <button className="btn btn-outline btn-sm btn-icon" title="View History" onClick={() => setViewingAgent(a)}><List size={13} /></button>
-                                                    <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
-                                                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                            <tfoot>
-                                <tr>
-                                    <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
-                                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-accent)' }}>
-                                        {(agents.filter(a => a.type === activeTab).reduce((sum, a) => sum + (activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0)), 0) || 0).toLocaleString()} <span style={{ fontSize: 11 }}>{activeTab === 'conversion_sar' ? 'SAR' : 'AED'}</span>
-                                    </td>
-                                    <td colSpan={2}></td>
-                                </tr>
-                            </tfoot>
-                        </table>
+                    <div className="card">
+                        <div className="card-header" style={{ paddingBottom: 16, borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'center', background: 'rgba(255,255,255,0.02)' }}>
+                            <div className="flex gap-2 p-1" style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '14px' }}>
+                                <button
+                                    style={{
+                                        fontSize: 15, padding: '10px 24px', borderRadius: '10px', border: 'none',
+                                        background: activeTab === 'conversion_sar' ? 'var(--brand-accent)' : 'transparent',
+                                        color: activeTab === 'conversion_sar' ? '#fff' : 'var(--text-muted)',
+                                        fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s shadow 0.2s',
+                                        boxShadow: activeTab === 'conversion_sar' ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'
+                                    }}
+                                    onClick={() => setActiveTab('conversion_sar')}
+                                >
+                                    SAR → AED Agents
+                                </button>
+                                <button
+                                    style={{
+                                        fontSize: 15, padding: '10px 24px', borderRadius: '10px', border: 'none',
+                                        background: activeTab === 'conversion_aed' ? 'var(--brand-accent)' : 'transparent',
+                                        color: activeTab === 'conversion_aed' ? '#fff' : 'var(--text-muted)',
+                                        fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s shadow 0.2s',
+                                        boxShadow: activeTab === 'conversion_aed' ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'
+                                    }}
+                                    onClick={() => setActiveTab('conversion_aed')}
+                                >
+                                    AED → INR Agents
+                                </button>
+                            </div>
+                        </div>
+                        <div className="table-wrapper">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style={{ width: 40 }}>#</th>
+                                        <th>Agent Name</th>
+                                        <th className="hide-md" style={{ width: 130 }}>Phone</th>
+                                        <th style={{ textAlign: 'right' }}>Business Debit</th>
+                                        <th style={{ textAlign: 'right' }}>Business Credit</th>
+                                        <th style={{ textAlign: 'right', fontWeight: 800 }}>Net Balance</th>
+                                        <th style={{ textAlign: 'center', width: 200 }} className="hide-sm">Operations</th>
+                                        <th style={{ textAlign: 'right', width: 100 }}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {agents
+                                        .filter(a => a.type === activeTab)
+                                        .filter(a => a.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+                                        .map((a, i) => {
+                                        const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
+                                        const rowCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
+                                        const debit = bal > 0 ? bal : 0;
+                                        const credit = bal < 0 ? Math.abs(bal) : 0;
+
+                                        return (
+                                            <tr key={a.$id}>
+                                                <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                                <td>
+                                                    <div style={{ fontWeight: 600 }}>
+                                                        <button onClick={() => setViewingAgent(a)} className="agent-link">
+                                                            {a.name}
+                                                        </button>
+                                                    </div>
+                                                    {a.notes && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>{a.notes}</div>}
+                                                </td>
+                                                <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{a.phone || '—'}</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 700, color: debit > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                                    {debit > 0 ? debit.toLocaleString() : '—'} <span style={{ fontSize: 10, opacity: 0.6 }}>{rowCur}</span>
+                                                </td>
+                                                <td style={{ textAlign: 'right', fontWeight: 700, color: credit > 0 ? '#ef4444' : 'var(--text-muted)' }}>
+                                                    {credit > 0 ? credit.toLocaleString() : '—'} <span style={{ fontSize: 10, opacity: 0.6 }}>{rowCur}</span>
+                                                </td>
+                                                <td style={{ textAlign: 'right', fontWeight: 900, color: bal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>
+                                                    {bal.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{rowCur}</span>
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                        <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Ops</button>
+                                                        <button className="btn btn-outline btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Settle</button>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                                        <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
+                                                        <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colSpan={3} className="hide-md" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)', paddingRight: 20 }}>GRAND TOTALS:</td>
+                                        <td style={{ textAlign: 'right', fontWeight: 800, color: '#4a9eff' }}>{debits.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
+                                        <td style={{ textAlign: 'right', fontWeight: 800, color: '#ef4444' }}>{credits.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
+                                        <td style={{ textAlign: 'right', fontWeight: 900, color: netBal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>{netBal.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
+                                        <td colSpan={2}></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
                     </div>
-                </div>
+                </>
             )}
 
             {/* History Modal */}
             {viewingAgent && (
-                <LedgerModal
-                    agent={viewingAgent}
-                    onClose={() => setViewingAgent(null)}
-                />
+                <LedgerModal agent={viewingAgent} onClose={() => setViewingAgent(null)} />
             )}
 
             {/* Modal */}
@@ -405,24 +409,19 @@ export default function ConversionAgentsPage() {
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Full Name *</label>
-                                    <input id="ca-name" className="form-input" placeholder="Agent name"
+                                    <input className="form-input" placeholder="Agent name"
                                         value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
                                 </div>
                                 <div className="form-row" style={{ display: 'flex', gap: 12 }}>
                                     <div className="form-group" style={{ flex: 1 }}>
                                         <label className="form-label">Phone</label>
-                                        <input id="ca-phone" className="form-input" placeholder="+966 5X XXX XXXX"
+                                        <input className="form-input" placeholder="+966 5X XXX XXXX"
                                             value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                                     </div>
                                     {(user?.role === 'admin' || user?.role === 'collector') && (
                                         <div className="form-group" style={{ flex: 1 }}>
-                                            <label className="form-label">
-                                                Balance ({form.type === 'conversion_sar' ? 'SAR' : 'AED'})
-                                            </label>
-                                            <input
-                                                className="form-input"
-                                                type="number"
-                                                step="any"
+                                            <label className="form-label">Balance ({form.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
+                                            <input className="form-input" type="number" step="any"
                                                 value={form.type === 'conversion_sar' ? form.sar_balance : form.aed_balance}
                                                 onChange={e => {
                                                     const val = parseFloat(e.target.value) || 0;
@@ -436,13 +435,13 @@ export default function ConversionAgentsPage() {
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Notes</label>
-                                    <textarea id="ca-notes" className="form-textarea" placeholder="Additional info…"
+                                    <textarea className="form-textarea" placeholder="Additional info…"
                                         value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
                                 </div>
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
-                                <button id="save-ca-btn" type="submit" className="btn btn-accent" disabled={saving}>
+                                <button type="submit" className="btn btn-accent" disabled={saving}>
                                     {saving ? 'Saving…' : editItem ? 'Update' : 'Add Agent'}
                                 </button>
                             </div>
@@ -467,8 +466,8 @@ export default function ConversionAgentsPage() {
                             </div>
                             <div className="modal-body">
                                 <div className="card mb-4" style={{ background: 'var(--bg-main)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{activeAgent.name} Status:</span>
+                                    <div className="flex justify-between items-center">
+                                        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Status:</span>
                                         <div style={{ textAlign: 'right' }}>
                                             <div style={{ fontSize: 18, fontWeight: 800, color: bal >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)' }}>
                                                 {bal.toLocaleString()} {balCur}
@@ -481,39 +480,24 @@ export default function ConversionAgentsPage() {
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Amount ({balCur})</label>
-                                    <input className="form-input" style={{ fontSize: 22, fontWeight: 700, height: 55 }} type="number" step="any" required
+                                    <input className="form-input text-xl font-bold h-14" type="number" step="any" required
                                         value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
                                 </div>
-                                <div className="form-group" style={{ marginTop: 16 }}>
-                                    <label className="form-label">Notes (Optional)</label>
+                                <div className="form-group mt-4">
+                                    <label className="form-label">Notes</label>
                                     <textarea className="form-textarea" rows="2" placeholder="Details..."
                                         value={depositNote} onChange={e => setDepositNote(e.target.value)} />
                                 </div>
-
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 24 }}>
-                                    <button
-                                        type="button"
-                                        className="btn"
-                                        style={{ flex: '1 1 200px', background: 'var(--brand-primary)', color: '#fff', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
-                                        disabled={saving}
-                                        onClick={() => handleActionSubmit('debit')}
-                                    >
-                                        <div style={{ fontSize: 14 }}>Give {balCur}</div>
-                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>To convert later</div>
+                                <div className="grid grid-cols-2 gap-3 mt-6">
+                                    <button type="button" className="btn btn-primary py-3 font-bold" disabled={saving} onClick={() => handleActionSubmit('debit')}>
+                                        Give {balCur}
                                     </button>
-                                    <button
-                                        type="button"
-                                        className="btn"
-                                        style={{ flex: '1 1 200px', background: 'var(--brand-gold)', color: '#000', padding: '14px 10px', fontWeight: 700, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}
-                                        disabled={saving}
-                                        onClick={() => handleActionSubmit('credit')}
-                                    >
-                                        <div style={{ fontSize: 14 }}>Receive {balCur}</div>
-                                        <div style={{ fontSize: 9, opacity: 0.8, fontWeight: 400 }}>Return / Pocket</div>
+                                    <button type="button" className="btn btn-warning py-3 font-bold text-black" disabled={saving} onClick={() => handleActionSubmit('credit')}>
+                                        Receive {balCur}
                                     </button>
                                 </div>
                             </div>
-                            <div className="modal-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
+                            <div className="modal-footer">
                                 <button type="button" className="btn btn-outline w-full" onClick={() => setDepositModal(false)}>Close</button>
                             </div>
                         </div>
@@ -521,50 +505,36 @@ export default function ConversionAgentsPage() {
                 );
             })()}
 
-            {/* Receive Modal */}
+            {/* Settle/Receive Modal */}
             {receiveModal && activeAgent && (
                 <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setReceiveModal(false)}>
-                    <div className="modal-content" style={{ maxWidth: 400, background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div className="modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 className="modal-title" style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Receive from {activeAgent.name}</h3>
-                            <button className="close-btn" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} onClick={() => setReceiveModal(false)}><X size={20} /></button>
+                    <div className="modal" style={{ maxWidth: 400 }}>
+                        <div className="modal-header">
+                            <h3 className="modal-title">Settle with {activeAgent.name}</h3>
+                            <button className="close-btn" onClick={() => setReceiveModal(false)}><X size={20} /></button>
                         </div>
-                        <form style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={handleReceiveSubmit}>
-                            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-                                Specify how much <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> is being cleared
-                                and at what rate. The resulting {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be credited to our dashboard balance.
+                        <form className="p-6 flex flex-col gap-4" onSubmit={handleReceiveSubmit}>
+                            <p className="text-sm text-gray-400">
+                                Settle <b>{activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'}</b> balance and record the resulting income.
                             </p>
-                            <div style={{ padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Currently Owed:</span>
-                                <span style={{ fontSize: 15, fontWeight: 700, color: activeAgent.type === 'conversion_sar' ? '#4a9eff' : 'var(--brand-gold)' }}>
-                                    {activeAgent.type === 'conversion_sar' ? `${(Number(activeAgent.sar_balance) || 0).toLocaleString()} SAR` : `${(Number(activeAgent.aed_balance) || 0).toLocaleString()} AED`}
-                                </span>
-                            </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Source Amount Settled ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
-                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                <label className="form-label">Source Amount ({activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
+                                <input className="form-input" type="number" step="any" required
                                     value={actionAmount} onChange={e => setActionAmount(e.target.value)} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Exchange Rate</label>
-                                <input className="form-input" style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)', color: '#fff' }} type="number" step="any" required
+                                <label className="form-label">Exchange Rate</label>
+                                <input className="form-input" type="number" step="any" required
                                     value={actionRate} onChange={e => setActionRate(e.target.value)} />
                             </div>
-                            {actionAmount && actionRate && (
-                                <div style={{ marginTop: 8, padding: 12, background: 'rgba(74,158,255,0.1)', borderRadius: 8, fontSize: 14, color: '#4a9eff', fontWeight: 600 }}>
-                                    Result: {activeAgent.type === 'conversion_sar' ? (Number(actionAmount) / Number(actionRate)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (Number(actionAmount) * Number(actionRate) || 0).toLocaleString()} {activeAgent.type === 'conversion_sar' ? 'AED' : 'INR'} will be recorded as income.
-                                </div>
-                            )}
-                            <div className="modal-actions" style={{ marginTop: 8, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                                <button type="button" className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: 8 }} onClick={() => setReceiveModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" style={{ padding: '8px 16px', borderRadius: 8 }} disabled={saving}>
-                                    {saving ? 'Processing...' : 'Confirm Receipt'}
-                                </button>
+                            <div className="modal-footer border-none px-0 pb-0">
+                                <button type="button" className="btn btn-outline" onClick={() => setReceiveModal(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-accent" disabled={saving}>Confirm Receipt</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-        </Layout >
+        </Layout>
     );
 }

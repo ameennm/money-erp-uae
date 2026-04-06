@@ -48,8 +48,8 @@ const EMPTY = {
     collection_agent_name: '',
     conversion_agent_id: '',
     conversion_agent_name: '',
-    distributor_id: '',
     distributor_name: '',
+    is_petty_cash: 0,
 };
 
 export default function TransactionsPage() {
@@ -103,8 +103,18 @@ export default function TransactionsPage() {
         e.preventDefault();
         if (isSavingRef.current) return;
 
-        if (!form.client_name || !form.inr_requested || !form.collection_agent_id || !form.collection_rate || !form.collected_amount || !form.distributor_id) {
-            return toast.error('Please fill all required fields');
+        const { is_petty_cash } = form;
+        const isRequired = !is_petty_cash;
+
+        // Validation: If petty cash and no target, still allowed (general migration)
+        // If not petty cash, standard validation
+        if (isRequired) {
+            if (!form.client_name || !form.inr_requested || !form.collection_agent_id || !form.collection_rate || !form.collected_amount || !form.distributor_id) {
+                return toast.error('Please fill all required fields');
+            }
+        } else {
+            // Migration mode validation
+            if (!form.collected_amount) return toast.error('Please enter the migration amount');
         }
 
         isSavingRef.current = true;
@@ -190,80 +200,115 @@ export default function TransactionsPage() {
                     fetchAll(); // Refresh to ensure state is consistent
                 }
             } else {
-                if (!payload.distributor_id) {
-                    isSavingRef.current = false;
-                    setSaving(false);
-                    return toast.error('Please select a Distributor');
-                }
+                if (payload.is_petty_cash) {
+                    // ── PETTY CASH / MIGRATION LOGIC ──
+                    const amt = parseFloat(payload.collected_amount) || 0;
+                    const type = amt >= 0 ? 'debit' : 'credit'; // Positive = Business Debit (They owe us)
+                    const absAmt = Math.abs(amt);
+                    const targetId = payload.collection_agent_id || payload.distributor_id;
+                    const target = agents.find(a => a.$id === targetId);
 
-                // ── Min rate enforcement ──
-                const currency = form.collected_currency;
-                const minRate = currency === 'AED' ? (settings.min_aed_rate || 0) : (settings.min_sar_rate || 0);
-                const collRate = parseFloat(form.collection_rate) || 0;
-                if (minRate > 0 && collRate < minRate) {
-                    isSavingRef.current = false;
-                    setSaving(false);
-                    return toast.error(
-                        `This amount can't be entered. Please check the rate and try again.`,
-                        { duration: 5000 }
-                    );
-                }
+                    payload.tx_id = genTxId(txs);
+                    payload.client_name = payload.client_name || 'Migration / Petty Cash';
+                    payload.status = 'completed';
+                    payload.collected_amount = amt;
+                    
+                    // Determine currency based on selection
+                    let cur = 'INR';
+                    if (payload.collection_agent_id && target) {
+                        cur = target.currency || 'SAR';
+                    }
 
-                payload.tx_id = genTxId(txs);
-                payload.creator_id = user.$id;
-                payload.creator_name = user.name;
-                payload.status = 'completed';
-                payload.actual_inr_distributed = round2(payload.inr_requested);
+                    const created = await dbService.createTransaction(payload);
 
-                const created = await dbService.createTransaction(payload);
-
-                // ── Update distributor balance and ledger ──
-                const dist = agents.find(a => a.$id === payload.distributor_id);
-                if (dist) {
-                    await ledgerService.recordEntry({
-                        agent: dist,
-                        amount: payload.inr_requested,
-                        currency: 'INR',
-                        type: 'credit', // Agent gave INR to client
-                        reference_type: 'transaction',
-                        reference_id: created.$id,
-                        description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
-                    });
-                }
-
-                // ── Update collection agent's balance and ledger ──
-                if (payload.collection_agent_id) {
-                    const agent = agents.find(a => a.$id === payload.collection_agent_id);
-                    if (agent) {
+                    if (target) {
                         await ledgerService.recordEntry({
-                            agent: agent,
-                            amount: payload.collected_amount,
-                            currency: payload.collected_currency,
-                            type: 'debit', // Agent received SAR from client
+                            agent: target,
+                            amount: absAmt,
+                            currency: cur,
+                            type: type,
                             reference_type: 'transaction',
                             reference_id: created.$id,
-                            description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
+                            description: `MIGRATION: Initial balance for ${target.name}`
                         });
                     }
-                }
+                    toast.success('Migration record created');
+                } else {
+                    // ── STANDARD TRANSACTION LOGIC ──
+                    if (!payload.distributor_id) {
+                        isSavingRef.current = false;
+                        setSaving(false);
+                        return toast.error('Please select a Distributor');
+                    }
 
-                // ── Update conversion agent's balance and ledger ──
-                if (payload.conversion_agent_id) {
-                    const convAgent = agents.find(a => a.$id === payload.conversion_agent_id);
-                    if (convAgent) {
+                    // ── Min rate enforcement ──
+                    const currency = form.collected_currency;
+                    const minRate = currency === 'AED' ? (settings.min_aed_rate || 0) : (settings.min_sar_rate || 0);
+                    const collRate = parseFloat(form.collection_rate) || 0;
+                    if (minRate > 0 && collRate < minRate) {
+                        isSavingRef.current = false;
+                        setSaving(false);
+                        return toast.error(
+                            `This amount can't be entered. Please check the rate and try again.`,
+                            { duration: 5000 }
+                        );
+                    }
+
+                    payload.tx_id = genTxId(txs);
+                    payload.creator_id = user.$id;
+                    payload.creator_name = user.name;
+                    payload.status = 'completed';
+                    payload.actual_inr_distributed = round2(payload.inr_requested);
+
+                    const created = await dbService.createTransaction(payload);
+
+                    // ── Update distributor balance and ledger ──
+                    const dist = agents.find(a => a.$id === payload.distributor_id);
+                    if (dist) {
                         await ledgerService.recordEntry({
-                            agent: convAgent,
-                            amount: payload.collected_amount,
-                            currency: payload.collected_currency,
-                            type: 'debit', // Agent received SAR to convert
+                            agent: dist,
+                            amount: payload.inr_requested,
+                            currency: 'INR',
+                            type: 'credit', // Agent gave INR to client
                             reference_type: 'transaction',
                             reference_id: created.$id,
-                            description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
+                            description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
                         });
                     }
-                }
 
-                toast.success('Transaction Logged');
+                    // ── Update collection agent's balance and ledger ──
+                    if (payload.collection_agent_id) {
+                        const agent = agents.find(a => a.$id === payload.collection_agent_id);
+                        if (agent) {
+                            await ledgerService.recordEntry({
+                                agent: agent,
+                                amount: payload.collected_amount,
+                                currency: payload.collected_currency,
+                                type: 'debit', // Agent received SAR from client
+                                reference_type: 'transaction',
+                                reference_id: created.$id,
+                                description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
+                            });
+                        }
+                    }
+
+                    // ── Update conversion agent's balance and ledger ──
+                    if (payload.conversion_agent_id) {
+                        const convAgent = agents.find(a => a.$id === payload.conversion_agent_id);
+                        if (convAgent) {
+                            await ledgerService.recordEntry({
+                                agent: convAgent,
+                                amount: payload.collected_amount,
+                                currency: payload.collected_currency,
+                                type: 'debit', // Agent received SAR to convert
+                                reference_type: 'transaction',
+                                reference_id: created.$id,
+                                description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
+                            });
+                        }
+                    }
+                    toast.success('Transaction Logged');
+                }
                 fetchAll(); // Refresh everything to be safe
             }
             setModal(false);
@@ -449,108 +494,180 @@ export default function TransactionsPage() {
                             <h3 className="modal-title">{editTx ? 'Edit Transaction' : 'New Transaction Request'}</h3>
                             <button className="close-btn" onClick={() => setModal(false)}><X size={20} /></button>
                         </div>
-                        <form onSubmit={handleSave}>
+                         <form onSubmit={handleSave}>
                             <div className="modal-body">
-                                <div className="form-group">
-                                    <label className="form-label">Client Name</label>
-                                    <input className="form-input" required value={form.client_name}
-                                        onChange={e => setForm({ ...form, client_name: e.target.value })} />
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label className="form-label">INR Requested</label>
-                                        <input className="form-input" type="number" required value={form.inr_requested}
+                                <div className="form-group" style={{ marginBottom: 20 }}>
+                                    <label className="flex items-center gap-2 cursor-pointer p-3 rounded-xl transition-all" 
+                                        style={{ 
+                                            border: form.is_petty_cash ? '2px solid var(--brand-accent)' : '1px solid rgba(255,255,255,0.1)',
+                                            background: form.is_petty_cash ? 'rgba(74,158,255,0.08)' : 'transparent'
+                                        }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={form.is_petty_cash === 1}
                                             onChange={e => {
-                                                const inr = parseFloat(e.target.value) || 0;
-                                                const rate = parseFloat(form.collection_rate) || 0;
-                                                const collected = rate > 0 ? (inr / 1000) * rate : form.collected_amount;
-                                                setForm({ ...form, inr_requested: e.target.value, collected_amount: rate > 0 ? collected.toFixed(2) : form.collected_amount });
-                                            }} />
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Collection Agent</label>
-                                        <select className="form-select" required value={form.collection_agent_id}
-                                            onChange={e => {
-                                                const a = agents.find(x => x.$id === e.target.value);
-                                                setForm({
-                                                    ...form,
-                                                    collection_agent_id: e.target.value,
-                                                    collection_agent_name: a?.name || '',
-                                                    collected_currency: a?.currency || form.collected_currency
-                                                });
-                                            }}>
-                                            <option value="">Select Agent</option>
-                                            {agents.filter(a => a.type.startsWith('collection')).map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label className="form-label">Collect In</label>
-                                        <select className="form-select" value={form.collected_currency}
-                                            onChange={e => setForm({ ...form, collected_currency: e.target.value })}>
-                                            <option value="SAR">SAR</option>
-                                            <option value="AED">AED</option>
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">
-                                            Collection Rate (per 1000 INR)
-                                        </label>
-                                        <input className="form-input" type="number" step="0.01" required value={form.collection_rate}
-                                            placeholder="Enter rate"
-                                            style={{
-                                                borderColor: !editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency
-                                                    ? 'var(--status-failed)' : undefined
+                                                const checked = e.target.checked;
+                                                setForm({ ...EMPTY, is_petty_cash: checked ? 1 : 0 });
                                             }}
-                                            onChange={e => {
-                                                const rate = parseFloat(e.target.value) || 0;
-                                                const inr = parseFloat(form.inr_requested) || 0;
-                                                const collected = rate > 0 ? (inr / 1000) * rate : form.collected_amount;
-                                                setForm({ ...form, collection_rate: e.target.value, collected_amount: rate > 0 ? collected.toFixed(2) : form.collected_amount });
-                                            }} />
-                                        {!editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency && (
-                                            <div style={{ fontSize: 11, color: 'var(--status-failed)', marginTop: 4 }}>
-                                                ⚠️ This amount can't be entered
+                                            className="w-5 h-5 rounded-md text-brand-accent focus:ring-brand-accent"
+                                        />
+                                        <div className="flex flex-col">
+                                            <span style={{ fontSize: 14, fontWeight: 800, color: form.is_petty_cash ? 'var(--brand-accent)' : 'var(--text-primary)' }}>MIGRATION MODE (Petty Cash)</span>
+                                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Direct balance adjustment for historical data. Positive = They owe us.</span>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                {form.is_petty_cash ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                        <div className="form-group">
+                                            <label className="form-label">Migration Description</label>
+                                            <input className="form-input" placeholder="e.g. Opening Balance (Optional)" value={form.client_name}
+                                                onChange={e => setForm({ ...form, client_name: e.target.value })} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Target (Agent or Distributor)</label>
+                                            <select className="form-select" value={form.collection_agent_id || form.distributor_id}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    const ag = agents.find(x => x.$id === val);
+                                                    if (ag?.type === 'distributor') {
+                                                        setForm({ ...form, distributor_id: val, collection_agent_id: '', distributor_name: ag.name });
+                                                    } else {
+                                                        setForm({ ...form, collection_agent_id: val, distributor_id: '', collection_agent_name: ag?.name || '' });
+                                                    }
+                                                }}>
+                                                <option value="">General Petty Cash (No Ledger)</option>
+                                                <optgroup label="Agents">
+                                                    {agents.filter(a => a.type !== 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
+                                                </optgroup>
+                                                <optgroup label="Distributors">
+                                                    {agents.filter(a => a.type === 'distributor').map(d => <option key={d.$id} value={d.$id}>{d.name} (INR)</option>)}
+                                                </optgroup>
+                                            </select>
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">
+                                                Migration Amount ({
+                                                    form.distributor_id ? 'INR' : 
+                                                    (agents.find(a => a.$id === form.collection_agent_id)?.currency || 'SAR')
+                                                })
+                                            </label>
+                                            <input className="form-input" type="number" step="any" required 
+                                                autoFocus
+                                                placeholder="Positive = They owe us, Negative = We owe them"
+                                                value={form.collected_amount}
+                                                onChange={e => setForm({ ...form, collected_amount: e.target.value, inr_requested: e.target.value })}
+                                                style={{ fontSize: 24, fontWeight: 800, padding: '12px 16px' }} />
+                                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                <span>💡</span>
+                                                <span>Enter <b>Positive</b> if they have to pay us. Enter <b>Negative</b> if we have to pay them.</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="form-group">
+                                            <label className="form-label">Client Name</label>
+                                            <input className="form-input" required value={form.client_name}
+                                                onChange={e => setForm({ ...form, client_name: e.target.value })} />
+                                        </div>
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label className="form-label">INR Requested</label>
+                                                <input className="form-input" type="number" required value={form.inr_requested}
+                                                    onChange={e => {
+                                                        const inr = parseFloat(e.target.value) || 0;
+                                                        const rate = parseFloat(form.collection_rate) || 0;
+                                                        const collected = rate > 0 ? (inr / 1000) * rate : form.collected_amount;
+                                                        setForm({ ...form, inr_requested: e.target.value, collected_amount: rate > 0 ? collected.toFixed(2) : form.collected_amount });
+                                                    }} />
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Collection Agent *</label>
+                                                <select className="form-select" required value={form.collection_agent_id}
+                                                    onChange={e => {
+                                                        const a = agents.find(x => x.$id === e.target.value);
+                                                        setForm({
+                                                            ...form,
+                                                            collection_agent_id: e.target.value,
+                                                            collection_agent_name: a?.name || '',
+                                                            collected_currency: a?.currency || form.collected_currency
+                                                        });
+                                                    }}>
+                                                    <option value="">Select Agent</option>
+                                                    {agents.filter(a => a.type.startsWith('collection')).map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label className="form-label">Collect In</label>
+                                                <select className="form-select" value={form.collected_currency}
+                                                    onChange={e => setForm({ ...form, collected_currency: e.target.value })}>
+                                                    <option value="SAR">SAR</option>
+                                                    <option value="AED">AED</option>
+                                                </select>
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">
+                                                    Collection Rate (per 1000 INR)
+                                                </label>
+                                                <input className="form-input" type="number" step="0.01" required value={form.collection_rate}
+                                                    placeholder="Enter rate"
+                                                    style={{
+                                                        borderColor: !editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency
+                                                            ? 'var(--status-failed)' : undefined
+                                                    }}
+                                                    onChange={e => {
+                                                        const rate = parseFloat(e.target.value) || 0;
+                                                        const inr = parseFloat(form.inr_requested) || 0;
+                                                        const collected = rate > 0 ? (inr / 1000) * rate : form.collected_amount;
+                                                        setForm({ ...form, collection_rate: e.target.value, collected_amount: rate > 0 ? collected.toFixed(2) : form.collected_amount });
+                                                    }} />
+                                                {!editTx && form.collection_rate && minRateForCurrency > 0 && parseFloat(form.collection_rate) < minRateForCurrency && (
+                                                    <div style={{ fontSize: 11, color: 'var(--status-failed)', marginTop: 4 }}>
+                                                        ⚠️ This amount can't be entered
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Amount Collected ({form.collected_currency})</label>
+                                                <input className="form-input" type="number" step="0.01" required value={form.collected_amount}
+                                                    readOnly style={{ backgroundColor: 'var(--bg-main)', opacity: 0.8 }} />
+                                            </div>
+                                        </div>
+
+                                        {isAdmin && !editTx && previewProfit > 0 && (
+                                            <div style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                                    📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>{previewProfit.toLocaleString('en-IN')} {form.collected_currency}</strong>
+                                                    <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
+                                                        (rate spread: {parseFloat(form.collection_rate) - minRateForCurrency} × {form.inr_requested}/1000)
+                                                    </span>
+                                                </span>
                                             </div>
                                         )}
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Amount Collected ({form.collected_currency})</label>
-                                        <input className="form-input" type="number" step="0.01" required value={form.collected_amount}
-                                            readOnly style={{ backgroundColor: 'var(--bg-main)', opacity: 0.8 }} />
-                                    </div>
-                                </div>
 
-                                {/* Profit Preview — admin only */}
-                                {isAdmin && !editTx && previewProfit > 0 && (
-                                    <div style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
-                                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                                            📈 Estimated Profit: <strong style={{ color: 'var(--brand-accent)' }}>{previewProfit.toLocaleString('en-IN')} {form.collected_currency}</strong>
-                                            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
-                                                (rate spread: {parseFloat(form.collection_rate) - minRateForCurrency} × {form.inr_requested}/1000)
-                                            </span>
-                                        </span>
-                                    </div>
+                                        <div className="form-row">
+                                            <div className="form-group">
+                                                <label className="form-label">Distributor *</label>
+                                                <select className="form-select" required value={form.distributor_id}
+                                                    onChange={e => {
+                                                        const a = agents.find(x => x.$id === e.target.value);
+                                                        setForm({
+                                                            ...form,
+                                                            distributor_id: e.target.value,
+                                                            distributor_name: a?.name || ''
+                                                        });
+                                                    }}>
+                                                    <option value="">Select Distributor</option>
+                                                    {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </>
                                 )}
-
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label className="form-label">Distributor (Auto-Deducts)</label>
-                                        <select className="form-select" required value={form.distributor_id}
-                                            onChange={e => {
-                                                const a = agents.find(x => x.$id === e.target.value);
-                                                setForm({
-                                                    ...form,
-                                                    distributor_id: e.target.value,
-                                                    distributor_name: a?.name || ''
-                                                });
-                                            }}>
-                                            <option value="">Select Distributor</option>
-                                            {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
-                                        </select>
-                                    </div>
-                                </div>
                                 <div className="form-group">
                                     <label className="form-label">Notes</label>
                                     <textarea className="form-textarea" value={form.notes}
@@ -559,7 +676,9 @@ export default function TransactionsPage() {
                             </div>
                             <div className="modal-footer">
                                 <button type="button" className="btn btn-outline" onClick={() => setModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-accent" disabled={saving}>Save Transaction</button>
+                                <button type="submit" className="btn btn-accent" disabled={saving}>
+                                    {form.is_petty_cash ? 'Confirm Migration' : 'Save Transaction'}
+                                </button>
                             </div>
                         </form>
                     </div>

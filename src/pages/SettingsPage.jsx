@@ -54,7 +54,7 @@ export default function SettingsPage() {
         );
         if (confirmed !== 'wipe all data') return toast.error('Aborted. You did not type wipe all data.');
         setWiping(true);
-        const cols = ['transactions', 'aed_conversions', 'expenses', 'credits'];
+        const cols = ['transactions', 'aed_conversions', 'expenses', 'credits', 'ledger_entries'];
         try {
             let totalDeleted = 0;
             // Using existing API routes to fetch and delete
@@ -73,7 +73,7 @@ export default function SettingsPage() {
             while (!agentDone) {
                 const res = await fetch(`/api/agents`).then(r => r.json());
                 if (!res || res.length === 0) { agentDone = true; break; }
-                const toUpdate = res.filter(a => a.inr_balance > 0 || a.sar_balance > 0 || a.aed_balance > 0);
+                const toUpdate = res.filter(a => Number(a.inr_balance) !== 0 || Number(a.sar_balance) !== 0 || Number(a.aed_balance) !== 0);
                 if (toUpdate.length === 0) { agentDone = true; break; }
                 await Promise.all(toUpdate.map(doc =>
                     fetch(`/api/agents/${doc.$id}`, {
@@ -83,6 +83,9 @@ export default function SettingsPage() {
                     })
                 ));
             }
+            // Reset Settings
+            await dbService.upsertSettings({ min_sar_rate: 0, min_aed_rate: 0 });
+            await fetchSettings();
             toast.success(`✅ Wiped ${totalDeleted} records. All balances reset to zero.`);
         } catch (e) {
             toast.error('Wipe failed: ' + e.message);

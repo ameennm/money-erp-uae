@@ -145,14 +145,14 @@ export default function AgentsPage() {
     };
 
 
-    // ── Overall summary across all collection agents ──
-    const totalSarOwed = round2(agents.reduce((s, a) => s + (a.sar_balance || 0), 0));
-    const totalAedOwed = round2(agents.reduce((s, a) => s + (a.aed_balance || 0), 0));
+    // ── Business Perspective Summary (SAR & AED) ──
+    const sarDebits = agents.filter(a => a.currency !== 'AED').reduce((s, a) => s + Math.max(0, a.sar_balance || 0), 0);
+    const sarCredits = agents.filter(a => a.currency !== 'AED').reduce((s, a) => s + Math.abs(Math.min(0, a.sar_balance || 0)), 0);
+    const aedDebits = agents.filter(a => a.currency === 'AED').reduce((s, a) => s + Math.max(0, a.aed_balance || 0), 0);
+    const aedCredits = agents.filter(a => a.currency === 'AED').reduce((s, a) => s + Math.abs(Math.min(0, a.aed_balance || 0)), 0);
+
     const totalCollectedSar = round2(txs.filter(t => (t.collected_currency || 'SAR') === 'SAR').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
     const totalCollectedAed = round2(txs.filter(t => t.collected_currency === 'AED').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
-    // Paid to us = total collected minus still owed
-    const totalPaidSar = round2(Math.max(0, totalCollectedSar - totalSarOwed));
-    const totalPaidAed = round2(Math.max(0, totalCollectedAed - totalAedOwed));
 
     return (
         <Layout title="Agents">
@@ -175,26 +175,26 @@ export default function AgentsPage() {
                 </button>
             </div>
 
-            {/* Overall Summary Stats */}
+            {/* Overall Summary Stats - Business Perspective */}
             {!loading && agents.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
-                    {/* Total Distributed */}
-                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(74,158,255,0.05)', border: '1px solid rgba(74,158,255,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Total</div>
-                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
-                        {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 20 }}>
+                    {/* Total Business Debit (Assets - They owe us) */}
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(74,158,255,0.08)', border: '1px solid rgba(74,158,255,0.2)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Debit (Receivable)</div>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: '#4a9eff' }}>{sarDebits.toLocaleString()} <span style={{ fontSize: 12 }}>SAR</span></div>
+                        {aedDebits > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--brand-gold)', marginTop: 4 }}>{aedDebits.toLocaleString()} <span style={{ fontSize: 12 }}>AED</span></div>}
                     </div>
-                    {/* Total Paid to Us */}
-                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(0,200,150,0.05)', border: '1px solid rgba(0,200,150,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Paid</div>
-                        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--brand-accent)' }}>{totalPaidSar.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
-                        {totalCollectedAed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-accent)', marginTop: 2 }}>{totalPaidAed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                    {/* Total Business Credit (Liabilities - We owe them) */}
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Credit (Payable)</div>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: '#ef4444' }}>{sarCredits.toLocaleString()} <span style={{ fontSize: 12 }}>SAR</span></div>
+                        {aedCredits > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#ef4444', marginTop: 4 }}>{aedCredits.toLocaleString()} <span style={{ fontSize: 12 }}>AED</span></div>}
                     </div>
-                    {/* Total Owed to Us */}
-                    <div className="card" style={{ padding: '14px 18px', background: 'rgba(245,166,35,0.05)', border: '1px solid rgba(245,166,35,0.15)' }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Balance</div>
-                        <div style={{ fontSize: 17, fontWeight: 800, color: totalSarOwed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>{totalSarOwed.toLocaleString()} <span style={{ fontSize: 11 }}>SAR</span></div>
-                        {totalAedOwed > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand-gold)', marginTop: 2 }}>{totalAedOwed.toLocaleString()} <span style={{ fontSize: 11 }}>AED</span></div>}
+                    {/* Net Balance */}
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Net Exposure</div>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: (sarDebits - sarCredits) >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>{(sarDebits - sarCredits).toLocaleString()} <span style={{ fontSize: 12 }}>SAR</span></div>
+                        {(aedDebits > 0 || aedCredits > 0) && <div style={{ fontSize: 15, fontWeight: 800, color: (aedDebits - aedCredits) >= 0 ? 'var(--brand-gold)' : '#ef4444', marginTop: 4 }}>{(aedDebits - aedCredits).toLocaleString()} <span style={{ fontSize: 12 }}>AED</span></div>}
                     </div>
                 </div>
             )}
@@ -218,11 +218,9 @@ export default function AgentsPage() {
                                     <th>Agent Name</th>
                                     <th className="hide-sm">Type</th>
                                     <th className="hide-md">Phone</th>
-                                    <th className="hide-lg">Location</th>
-                                    <th className="hide-sm">Currency</th>
-                                    <th style={{ textAlign: 'right' }}>Total Coll.</th>
-                                    <th style={{ textAlign: 'right' }}>Total Paid</th>
-                                    <th style={{ textAlign: 'right', width: 200 }}>Balance Status</th>
+                                    <th style={{ textAlign: 'right' }}>Business Debit</th>
+                                    <th style={{ textAlign: 'right' }}>Business Credit</th>
+                                    <th style={{ textAlign: 'right', fontWeight: 800 }}>Net Balance</th>
                                     <th style={{ textAlign: 'right', width: 140 }}>Actions</th>
                                 </tr>
                             </thead>
@@ -237,11 +235,12 @@ export default function AgentsPage() {
                                     })
                                     .map((a, i) => {
                                     const cur = a.currency || 'SAR';
-                                    const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
-                                    const owed = round2(a[owedField] || 0);
-                                    const agentTxList = txs.filter(t => t.collection_agent_id === a.$id);
-                                    const totalDistributed = round2(agentTxList.reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
-                                    const paidToUs = round2(Math.max(0, totalDistributed - owed));
+                                    const balField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
+                                    const bal = round2(a[balField] || 0);
+                                    
+                                    const debit = bal > 0 ? bal : 0;
+                                    const credit = bal < 0 ? Math.abs(bal) : 0;
+
                                     return (
                                         <tr key={a.$id}>
                                             <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
@@ -251,7 +250,7 @@ export default function AgentsPage() {
                                                         {a.name}
                                                     </button>
                                                 </div>
-                                                {a.notes && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }} className="hide-md">{a.notes}</div>}
+                                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{a.phone}</div>
                                             </td>
                                             <td className="hide-sm">
                                                 <span className={`badge ${
@@ -259,36 +258,22 @@ export default function AgentsPage() {
                                                     a.type === 'distributor' ? 'badge-pending' : 
                                                     'badge-inprogress'
                                                 }`} style={{ fontSize: '10px' }}>
-                                                    {a.type === 'collection' ? 'Collector' : 
-                                                     a.type === 'distributor' ? 'Distributor' : 
-                                                     a.type === 'conversion_sar' ? 'SAR Conv' : 
-                                                     a.type === 'conversion_aed' ? 'AED Conv' : a.type}
+                                                    {a.type}
                                                 </span>
                                             </td>
-                                            <td style={{ color: 'var(--text-secondary)' }} className="hide-md">{a.phone || '—'}</td>
-                                            <td className="hide-lg">
-                                                <div className="flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
-                                                    <MapPin size={13} /> {a.location || '—'}
-                                                </div>
+                                            <td style={{ color: 'var(--text-secondary)' }} className="hide-md">{a.location || '—'}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: debit > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                                {debit > 0 ? debit.toLocaleString() : '—'} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{debit > 0 ? cur : ''}</span>
                                             </td>
-                                            <td className="hide-sm">
-                                                <span className={`badge ${a.currency === 'AED' ? 'badge-admin' : 'badge-collector'}`}>
-                                                    {a.currency || 'SAR'}
-                                                </span>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: credit > 0 ? '#ef4444' : 'var(--text-muted)' }}>
+                                                {credit > 0 ? credit.toLocaleString() : '—'} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{credit > 0 ? cur : ''}</span>
                                             </td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-primary)' }}>
-                                                {totalDistributed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
-                                            </td>
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: paidToUs > 0 ? 'var(--brand-accent)' : 'var(--text-muted)' }}>
-                                                {paidToUs.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
-                                            </td>
-                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                                 {owed.toLocaleString()} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{cur}</span>
+                                            <td style={{ textAlign: 'right', fontWeight: 900, color: bal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>
+                                                 {bal.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{cur}</span>
                                              </td>
-                                            <td style={{ textAlign: 'right' }}>
+                                             <td style={{ textAlign: 'right' }}>
                                                 <div className="flex gap-2 justify-end">
-                                                    {/* Receive Payment — only show if agent owes us something */}
-                                                    {owed > 0 && (
+                                                    {bal !== 0 && (
                                                         <button
                                                             className="btn btn-sm"
                                                             style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 700 }}
@@ -312,21 +297,18 @@ export default function AgentsPage() {
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={3} className="hide-sm"></td>
-                                    <td className="hide-md"></td>
-                                    <td className="hide-lg"></td>
-                                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>GRAND TOTAL</td>
+                                    <td colSpan={4} className="hide-md" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)', paddingRight: 20 }}>GRAND TOTALS:</td>
                                     <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                        <div style={{ color: 'var(--brand-primary)' }}>{totalCollectedSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
-                                        {totalCollectedAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalCollectedAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                        <div style={{ color: '#4a9eff' }}>{sarDebits.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {aedDebits > 0 && <div style={{ color: 'var(--brand-gold)' }}>{aedDebits.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
                                     </td>
                                     <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                        <div style={{ color: totalPaidSar > 0 ? 'var(--brand-accent)' : 'var(--text-muted)' }}>{totalPaidSar.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
-                                        {totalPaidAed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalPaidAed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                        <div style={{ color: '#ef4444' }}>{sarCredits.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {aedCredits > 0 && <div style={{ color: '#ef4444' }}>{aedCredits.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
                                     </td>
-                                    <td style={{ textAlign: 'right', fontWeight: 800 }}>
-                                        <div style={{ color: totalSarOwed > 0 ? '#4a9eff' : 'var(--text-muted)' }}>{totalSarOwed.toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
-                                        {totalAedOwed > 0 && <div style={{ color: 'var(--brand-gold)' }}>{totalAedOwed.toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
+                                    <td style={{ textAlign: 'right', fontWeight: 900 }}>
+                                        <div style={{ color: (sarDebits - sarCredits) >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>{(sarDebits - sarCredits).toLocaleString()} <span style={{ fontSize: 10 }}>SAR</span></div>
+                                        {(aedDebits > 0 || aedCredits > 0) && <div style={{ color: (aedDebits - aedCredits) >= 0 ? 'var(--brand-gold)' : '#ef4444' }}>{(aedDebits - aedCredits).toLocaleString()} <span style={{ fontSize: 10 }}>AED</span></div>}
                                     </td>
                                     <td></td>
                                 </tr>

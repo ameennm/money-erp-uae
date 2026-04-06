@@ -50,13 +50,17 @@ export default function DistributorsPage() {
     };
 
     useEffect(() => { fetchAll(); }, []);
-    const getDistTxs = (distId) => txs.filter(t => t.distributor_id === distId && t.status === 'completed');
     const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
     const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
     const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositNote(''); setDepositModal(true); };
     const openTransfer = (d) => { setTransferFrom(d); setTransferTo(''); setTransferAmount(''); setTransferModal(true); };
 
-    // Available INR (not given to distributors)
+    // ── Business Perspective Summary (INR) ──
+    const inrDebits = distributors.reduce((s, d) => s + Math.max(0, d.inr_balance || 0), 0);
+    const inrCredits = distributors.reduce((s, d) => s + Math.abs(Math.min(0, d.inr_balance || 0)), 0);
+    const netInr = inrDebits - inrCredits;
+
+    // Available INR pool logic
     const inrIncome = round2(expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0));
     const inrGeneralExp = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer').reduce((a, e) => a + (Number(e.amount) || 0), 0));
     const inrDeposited = round2(expenseRecs.filter(e => e.type !== 'income' && e.currency === 'INR' && e.category === 'Distributor Deposit').reduce((a, e) => a + (Number(e.amount) || 0), 0));
@@ -230,7 +234,6 @@ export default function DistributorsPage() {
                         <h3 style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                             {distributors.length} distributor{distributors.length !== 1 ? 's' : ''}
                         </h3>
-                        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Distributors handle the final payout of INR to clients.</p>
                     </div>
                     <SearchInput
                         value={searchTerm}
@@ -243,6 +246,24 @@ export default function DistributorsPage() {
                     <Plus size={16} /> Add Distributor
                 </button>
             </div>
+
+            {/* Business Ledger Summary */}
+            {!loading && distributors.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 20 }}>
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(74,158,255,0.08)', border: '1px solid rgba(74,158,255,0.2)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Debit (INR)</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: '#4a9eff' }}>₹{inrDebits.toLocaleString('en-IN')}</div>
+                    </div>
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Business Credit (INR)</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: '#ef4444' }}>₹{inrCredits.toLocaleString('en-IN')}</div>
+                    </div>
+                    <div className="card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Net Exposure</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: netInr >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>₹{netInr.toLocaleString('en-IN')}</div>
+                    </div>
+                </div>
+            )}
 
             {loading ? (
                 <div className="loading-screen" style={{ minHeight: '40vh' }}>
@@ -262,10 +283,9 @@ export default function DistributorsPage() {
                                     <th style={{ width: 40 }}>#</th>
                                     <th>Distributor Name</th>
                                     <th className="hide-md" style={{ width: 140 }}>Phone</th>
-                                    <th className="hide-sm" style={{ width: 80 }}>Txs</th>
-                                    <th style={{ textAlign: 'right', width: 160 }}>Total Distributed</th>
-                                    <th style={{ textAlign: 'right', width: 220 }}>Balance Status</th>
-                                    <th className="hide-lg">Notes</th>
+                                    <th style={{ textAlign: 'right' }}>Business Debit</th>
+                                    <th style={{ textAlign: 'right' }}>Business Credit</th>
+                                    <th style={{ textAlign: 'right', fontWeight: 800 }}>Net Balance</th>
                                     <th style={{ textAlign: 'right', width: 240 }}>Actions</th>
                                 </tr>
                             </thead>
@@ -276,47 +296,34 @@ export default function DistributorsPage() {
                                         d.phone?.toLowerCase().includes(searchTerm.toLowerCase())
                                     )
                                     .map((dist, i) => {
-                                    const distTxs = getDistTxs(dist.$id);
-                                    const totalINR = distTxs.reduce((sum, t) => sum + (Number(t.actual_inr_distributed) || 0), 0);
+                                    const bal = round2(dist.inr_balance || 0);
+                                    const debit = bal > 0 ? bal : 0;
+                                    const credit = bal < 0 ? Math.abs(bal) : 0;
+
                                     return (
                                         <tr key={dist.$id}>
                                             <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                                             <td style={{ fontWeight: 600 }}>
                                                 <div className="flex items-center gap-2">
-                                                    <div style={{
-                                                         width: 32, height: 32, borderRadius: '50%',
-                                                         background: 'linear-gradient(135deg, #a78bfa, var(--brand-accent))',
-                                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                         fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0
-                                                     }} className="hide-sm">
-                                                         {dist.name?.[0]?.toUpperCase()}
-                                                     </div>
                                                      <button
                                                          onClick={() => setViewingDist(dist)}
-                                                         style={{
-                                                             background: 'none', border: 'none', padding: 0,
-                                                             fontWeight: 'inherit', cursor: 'pointer',
-                                                             textDecoration: 'underline', color: 'var(--brand-accent)'
-                                                         }}
+                                                         className="agent-link"
                                                      >
                                                          {dist.name}
                                                      </button>
                                                  </div>
+                                                 {dist.notes && <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>{dist.notes}</div>}
                                              </td>
                                              <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }} className="hide-md">{dist.phone || '—'}</td>
-                                             <td className="hide-sm">{distTxs.length} txs</td>
-                                             <td style={{ fontWeight: 600, color: '#a78bfa', textAlign: 'right' }}>₹{(totalINR || 0).toLocaleString('en-IN')}</td>
-                                             <td style={{ fontWeight: 700, textAlign: 'right' }}>
-                                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                                     <div style={{ color: Number(dist.inr_balance) >= 0 ? 'var(--brand-primary)' : 'var(--brand-gold)', fontSize: '15px' }}>
-                                                         ₹{(Number(dist.inr_balance) || 0).toLocaleString('en-IN')}
-                                                     </div>
-                                                     <div style={{ fontSize: '10px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                                                         {Number(dist.inr_balance) >= 0 ? 'They owe us' : 'We owe them (Pocket)'}
-                                                     </div>
-                                                 </div>
+                                             <td style={{ textAlign: 'right', fontWeight: 700, color: debit > 0 ? '#4a9eff' : 'var(--text-muted)' }}>
+                                                {debit > 0 ? `₹${debit.toLocaleString('en-IN')}` : '—'}
                                              </td>
-                                             <td style={{ color: 'var(--text-muted)', fontSize: '13px' }} className="hide-lg">{dist.notes || '—'}</td>
+                                             <td style={{ textAlign: 'right', fontWeight: 700, color: credit > 0 ? '#ef4444' : 'var(--text-muted)' }}>
+                                                {credit > 0 ? `₹${credit.toLocaleString('en-IN')}` : '—'}
+                                             </td>
+                                             <td style={{ textAlign: 'right', fontWeight: 900, color: bal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>
+                                                 ₹{bal.toLocaleString('en-IN')}
+                                             </td>
                                              <td style={{ textAlign: 'right' }}>
                                                  <div className="flex gap-2 justify-end">
                                                     <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)} style={{ padding: '4px 10px', fontSize: 12 }}>
@@ -344,20 +351,11 @@ export default function DistributorsPage() {
                             </tbody>
                             <tfoot>
                                 <tr>
-                                    <td colSpan={2}></td>
-                                    <td className="hide-md"></td>
-                                    <td className="hide-sm"></td>
-                                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#a78bfa' }}>GRAND TOTAL</td>
-                                    <td style={{ fontWeight: 800 }}>
-                                        {distributors.reduce((sum, d) => sum + getDistTxs(d.$id).length, 0)} txs
-                                    </td>
-                                    <td style={{ fontWeight: 800, color: '#a78bfa' }}>
-                                        ₹{distributors.reduce((sum, d) => sum + getDistTxs(d.$id).reduce((s, t) => s + (Number(t.actual_inr_distributed) || 0), 0), 0).toLocaleString('en-IN')}
-                                    </td>
-                                    <td style={{ fontWeight: 800, color: distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0) >= 0 ? 'var(--brand-accent)' : 'var(--status-failed)' }}>
-                                        {distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0) < 0 ? '-' : ''}₹{Math.abs(distributors.reduce((sum, d) => sum + (Number(d.inr_balance) || 0), 0)).toLocaleString('en-IN')}
-                                    </td>
-                                    <td colSpan={2}></td>
+                                    <td colSpan={3} className="hide-md" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)', paddingRight: 20 }}>GRAND TOTALS:</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: '#4a9eff' }}>₹{inrDebits.toLocaleString('en-IN')}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 800, color: '#ef4444' }}>₹{inrCredits.toLocaleString('en-IN')}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 900, color: netInr >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>₹{netInr.toLocaleString('en-IN')}</td>
+                                    <td></td>
                                 </tr>
                             </tfoot>
                         </table>

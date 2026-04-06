@@ -9,53 +9,6 @@ import { applyDateRange, createSearchMatcher } from '../utils/filterHelpers';
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
-const LABEL_CONFIG = {
-    distributor: {
-        debit: 'Total Deposited',
-        credit: 'Total Distributed',
-        balance: 'Balance in Hand',
-        debitIcon: TrendingUp,
-        creditIcon: TrendingDown,
-        balanceIcon: Wallet,
-        debitColor: '#4a9eff',
-        creditColor: '#ff5460',
-        balanceColor: '#a78bfa',
-    },
-    collection: {
-        debit: 'Total',
-        credit: 'Paid',
-        balance: 'Balance',
-        debitIcon: TrendingUp,
-        creditIcon: TrendingDown,
-        balanceIcon: Wallet,
-        debitColor: '#4a9eff',
-        creditColor: '#ff5460',
-        balanceColor: '#25D366',
-    },
-    conversion_sar: {
-        debit: 'Total Given',
-        credit: 'Total Returned',
-        balance: 'Balance',
-        debitIcon: TrendingUp,
-        creditIcon: TrendingDown,
-        balanceIcon: Wallet,
-        debitColor: '#4a9eff',
-        creditColor: '#ff5460',
-        balanceColor: '#25D366',
-    },
-    conversion_aed: {
-        debit: 'Total Given',
-        credit: 'Total Returned',
-        balance: 'Balance',
-        debitIcon: TrendingUp,
-        creditIcon: TrendingDown,
-        balanceIcon: Wallet,
-        debitColor: '#f5a623',
-        creditColor: '#ff5460',
-        balanceColor: '#25D366',
-    },
-};
-
 export default function LedgerModal({ agent, onClose }) {
     const [entries, setEntries] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -63,10 +16,6 @@ export default function LedgerModal({ agent, onClose }) {
     const [search, setSearch] = useState('');
     const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
     
-    const type = agent?.type || 'collection';
-
-    const cfg = LABEL_CONFIG[type] || LABEL_CONFIG.collection;
-
     const fetchEntries = async () => {
         setLoading(true);
         try {
@@ -74,8 +23,7 @@ export default function LedgerModal({ agent, onClose }) {
                 Query.equal('agent_id', agent.$id),
                 Query.orderDesc('createdAt'),
             ]);
-            const filtered = res.documents.filter(e => !e.agent_type || e.agent_type === agent.type);
-            setEntries(filtered);
+            setEntries(res.documents);
         } catch (e) {
             toast.error('Failed to load: ' + e.message);
         } finally {
@@ -96,13 +44,11 @@ export default function LedgerModal({ agent, onClose }) {
             reference_type: e.reference_type,
             reference_id: e.reference_id,
             currency: e.currency,
-            amt: e.type === 'debit' ? Number(e.amount) : -Number(e.amount),
             credit: e.type === 'credit' ? Number(e.amount) : 0,
             debit: e.type === 'debit' ? Number(e.amount) : 0,
         }));
     }, [entries]);
 
-    // Calculate chronological absolute running balance for all entries BEFORE visual filtering
     const allEntriesWithBalance = useMemo(() => {
         const sorted = [...allEntries].sort((a, b) => new Date(a._date) - new Date(b._date));
         const runningBal = { SAR: 0, AED: 0, INR: 0 };
@@ -113,29 +59,20 @@ export default function LedgerModal({ agent, onClose }) {
                 if (Math.abs(runningBal[cur]) < 0.001) runningBal[cur] = 0;
             }
             return { ...entry, runningBalance: cur ? runningBal[cur] : 0 };
-        }).reverse(); // Latest first for display
+        }).reverse(); 
     }, [allEntries]);
 
-    // Apply Filters (Currency, Date Range, Search)
     const filtered = useMemo(() => {
         let result = allEntriesWithBalance;
-
-        // Apply Date Range
         result = applyDateRange(result, dateRange.range, dateRange.customFrom, dateRange.customTo, '_date');
-
-        // Apply Currency Filter
         if (currencyFilter !== 'All') {
             result = result.filter(r => r.currency === currencyFilter);
         }
-
-        // Apply Search Matcher
         const searchMatcher = createSearchMatcher(['particular', 'reference_type']);
         result = result.filter(r => searchMatcher(r, search));
-
         return result;
     }, [allEntriesWithBalance, dateRange, currencyFilter, search]);
 
-    // Totals per currency calculated ONLY from visually active/filtered transactions
     const allCurrencies = ['SAR', 'AED', 'INR'];
     const displayCurrencies = currencyFilter === 'All' ? allCurrencies : [currencyFilter];
 
@@ -149,11 +86,7 @@ export default function LedgerModal({ agent, onClose }) {
         totals[cur] = { debit: totalDebit, credit: totalCredit, balance: bal };
     });
 
-    const activeFilterCount = [
-        search,
-        currencyFilter !== 'All',
-        dateRange.range !== 'All Time'
-    ].filter(Boolean).length;
+    const activeFilterCount = [search, currencyFilter !== 'All', dateRange.range !== 'All Time'].filter(Boolean).length;
 
     const resetFilters = () => {
         setSearch('');
@@ -166,16 +99,15 @@ export default function LedgerModal({ agent, onClose }) {
             '#': filtered.length - i,
             'Date': r._date ? format(new Date(r._date), 'dd-MM-yyyy HH:mm') : '',
             'Particular': r.particular,
-            'Type': r._type.toUpperCase(),
+            'Business Debit': r.debit || '',
+            'Business Credit': r.credit || '',
             'Currency': r.currency,
-            [cfg.debit]: r.debit || '',
-            [cfg.credit]: r.credit || '',
-            'Balance': r.runningBalance,
+            'Net Balance': r.runningBalance,
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, `${agent.name}_Ledger`);
-        XLSX.writeFile(wb, `Ledger_${agent.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+        XLSX.writeFile(wb, `Business_Ledger_${agent.name}.xlsx`);
         toast.success(`Downloaded ledger`);
     };
 
@@ -183,174 +115,117 @@ export default function LedgerModal({ agent, onClose }) {
 
     return (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-            <div className="modal" style={{ maxWidth: '900px', width: '95%', maxHeight: '95vh', display: 'flex', flexDirection: 'column' }}>
-                {/* ── Header ── */}
-                <div className="modal-header" style={{ paddingBottom: 16 }}>
+            <div className="modal" style={{ maxWidth: '950px', width: '95%', maxHeight: '95vh', display: 'flex', flexDirection: 'column' }}>
+                <div className="modal-header">
                     <div>
-                        <h3 className="modal-title" style={{ fontSize: 24 }}>{agent.name}</h3>
-                        <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                            {agent.type === 'distributor' ? 'Distributor' : agent.type === 'collection' ? 'Collection Agent' : 'Conversion Agent'} — {entries.length} entries
+                        <h3 className="modal-title" style={{ fontSize: 22 }}>{agent.name} — Business Ledger</h3>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            View history from the perspective of the business. 
+                            <strong> Debit</strong> (Owed to us) | <strong>Credit</strong> (We owe them).
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
-                            <Download size={14} /> Excel
-                        </button>
+                    <div className="flex gap-2">
+                        <button className="btn btn-outline btn-sm" onClick={exportToExcel}><Download size={14} /> Excel</button>
                         <button className="close-btn" onClick={onClose}><X size={20} /></button>
                     </div>
                 </div>
 
                 <div className="modal-body" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', background: 'var(--bg-color)' }}>
                     {loading ? (
-                        <div className="loading-screen" style={{ minHeight: '300px' }}>
-                            <div className="spinner" /><p>Loading…</p>
-                        </div>
+                        <div className="loading-screen" style={{ minHeight: '300px' }}><div className="spinner" /><p>Loading…</p></div>
                     ) : (
                         <>
-                            {/* ── Summary Report Cards ── */}
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-                                {/* Deposited / Total Given */}
-                                <div className="card" style={{ padding: '20px 18px', border: `1px solid ${cfg.debitColor}30`, background: `linear-gradient(135deg, ${cfg.debitColor}08, transparent)` }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${cfg.debitColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <TrendingUp size={16} color={cfg.debitColor} />
-                                        </div>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                            + {cfg.debit}
-                                        </div>
+                                <div className="card" style={{ padding: '16px', border: '1px solid rgba(74,158,255,0.2)', background: 'rgba(74,158,255,0.05)' }}>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <TrendingUp size={16} color="#4a9eff" />
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Business Debit</span>
                                     </div>
-                                    {displayCurrencies.map(cur => {
-                                        const t = totals[cur];
-                                        return (
-                                            <div key={cur} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>{cur}</span>
-                                                <span style={{ fontSize: 15, fontWeight: 800, color: cfg.debitColor }}>{fmt(t.debit)}</span>
-                                            </div>
-                                        );
-                                    })}
+                                    {displayCurrencies.map(c => (
+                                        <div key={c} className="flex justify-between items-center mb-1">
+                                            <span className="text-[10px] font-bold text-gray-500">{c}</span>
+                                            <span className="text-lg font-black text-[#4a9eff]">{fmt(totals[c].debit)}</span>
+                                        </div>
+                                    ))}
                                 </div>
 
-                                {/* Distributed / Paid / Returned */}
-                                <div className="card" style={{ padding: '20px 18px', border: `1px solid ${cfg.creditColor}30`, background: `linear-gradient(135deg, ${cfg.creditColor}08, transparent)` }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${cfg.creditColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <TrendingDown size={16} color={cfg.creditColor} />
-                                        </div>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                            − {cfg.credit}
-                                        </div>
+                                <div className="card" style={{ padding: '16px', border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)' }}>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <TrendingDown size={16} color="#ef4444" />
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Business Credit</span>
                                     </div>
-                                    {displayCurrencies.map(cur => {
-                                        const t = totals[cur];
-                                        return (
-                                            <div key={cur} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>{cur}</span>
-                                                <span style={{ fontSize: 15, fontWeight: 800, color: cfg.creditColor }}>{fmt(t.credit)}</span>
-                                            </div>
-                                        );
-                                    })}
+                                    {displayCurrencies.map(c => (
+                                        <div key={c} className="flex justify-between items-center mb-1">
+                                            <span className="text-[10px] font-bold text-gray-500">{c}</span>
+                                            <span className="text-lg font-black text-[#ef4444]">{fmt(totals[c].credit)}</span>
+                                        </div>
+                                    ))}
                                 </div>
 
-                                {/* Balance in Hand */}
-                                <div className="card" style={{ padding: '20px 18px', border: `1px solid ${cfg.balanceColor}40`, background: `linear-gradient(135deg, ${cfg.balanceColor}10, transparent)` }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${cfg.balanceColor}25`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <Wallet size={16} color={cfg.balanceColor} />
-                                        </div>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                            {cfg.balance}
-                                        </div>
+                                <div className="card" style={{ padding: '16px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)' }}>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Wallet size={16} color="var(--brand-primary)" />
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Net Position</span>
                                     </div>
-                                    {displayCurrencies.map(cur => {
-                                        const t = totals[cur];
-                                        const balColor = t.balance >= 0 ? cfg.balanceColor : 'var(--status-failed)';
-                                        return (
-                                            <div key={cur} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>{cur}</span>
-                                                <span style={{ fontSize: 15, fontWeight: 800, color: balColor }}>
-                                                    {t.balance >= 0 ? '+' : '−'}{fmt(Math.abs(t.balance))}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
+                                    {displayCurrencies.map(c => (
+                                        <div key={c} className="flex justify-between items-center mb-1">
+                                            <span className="text-[10px] font-bold text-gray-500">{c}</span>
+                                            <span className={`text-lg font-black ${totals[c].balance >= 0 ? 'text-brand-primary' : 'text-[#ef4444]'}`}>
+                                                {totals[c].balance >= 0 ? '+' : ''}{fmt(totals[c].balance)}
+                                            </span>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
-                            {/* ── Unified Filter Bar ── */}
                             <FilterBar showClearAll onClearAll={resetFilters} activeFilterCount={activeFilterCount}>
-                                <SearchInput
-                                    value={search}
-                                    onChange={setSearch}
-                                    placeholder="Search details..."
-                                />
-                                <CurrencyFilter
-                                    value={currencyFilter}
-                                    onChange={setCurrencyFilter}
-                                    currencies={['All', 'SAR', 'AED', 'INR']}
-                                />
-                                <DateRangeFilter
-                                    value={dateRange}
-                                    onChange={setDateRange}
-                                />
+                                <SearchInput value={search} onChange={setSearch} placeholder="Search ledger..." />
+                                <CurrencyFilter value={currencyFilter} onChange={setCurrencyFilter} currencies={['All', 'SAR', 'AED', 'INR']} />
+                                <DateRangeFilter value={dateRange} onChange={setDateRange} />
                             </FilterBar>
 
-                            {/* ── Transaction List ── */}
                             {filtered.length === 0 ? (
-                                <div className="empty-state card" style={{ padding: 40 }}>
-                                    <FileSpreadsheet size={40} />
-                                    <p>No entries found.</p>
-                                </div>
+                                <div className="empty-state card py-20"><FileSpreadsheet size={40} /><p>No ledger entries found.</p></div>
                             ) : (
-                                <div className="card" style={{ padding: 0, border: '1px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+                                <div className="card p-0 overflow-hidden border-border">
                                     <div className="table-wrapper">
-                                        <table className="data-table" style={{ fontSize: 13, borderCollapse: 'collapse' }}>
+                                        <table className="data-table text-sm border-collapse">
                                             <thead>
-                                                <tr style={{ background: 'var(--bg-main)' }}>
-                                                    <th style={{ width: 40, padding: '14px 12px' }}>#</th>
-                                                    <th style={{ width: 100 }}>Date</th>
+                                                <tr className="bg-main">
+                                                    <th className="w-10 p-4">#</th>
+                                                    <th className="w-28">Date</th>
                                                     <th>Particular</th>
-                                                    <th style={{ width: 70 }}>Currency</th>
-                                                    <th style={{ textAlign: 'right', color: cfg.debitColor, width: 120 }}>− {cfg.credit.split(' ').pop()}</th>
-                                                    <th style={{ textAlign: 'right', color: cfg.creditColor, width: 120 }}>+ {cfg.debit.split(' ').pop()}</th>
-                                                    <th style={{ textAlign: 'right', width: 130 }}>Balance</th>
+                                                    <th className="w-20 text-center">Cur</th>
+                                                    <th className="w-32 text-right text-[#4a9eff]">Debit (+)</th>
+                                                    <th className="w-32 text-right text-[#ef4444]">Credit (−)</th>
+                                                    <th className="w-36 text-right">Balance</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {filtered.map((r, i) => {
-                                                    const balCol = r.runningBalance >= 0 ? cfg.balanceColor : 'var(--status-failed)';
+                                                    const balCol = r.runningBalance >= 0 ? 'text-brand-primary' : 'text-[#ef4444]';
                                                     const curCol = { SAR: '#4a9eff', AED: 'var(--brand-gold)', INR: '#a78bfa' }[r.currency] || 'var(--text-muted)';
                                                     return (
-                                                        <tr key={r._id + i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                                            <td style={{ color: 'var(--text-muted)', fontSize: 11, padding: '12px' }}>
-                                                                {filtered.length - i}
+                                                        <tr key={r._id + i} className="border-b border-border">
+                                                            <td className="text-[11px] text-gray-500 p-3">{filtered.length - i}</td>
+                                                            <td className="text-[11px] text-gray-400 whitespace-nowrap">
+                                                                {r._date ? format(new Date(r._date), 'dd MMM yyyy') : '—'}
                                                             </td>
-                                                            <td style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                                                                {r._date ? format(new Date(r._date), 'dd MMM yy') : '—'}
+                                                            <td className="font-semibold py-3">
+                                                                <div className="truncate max-w-sm">{r.particular}</div>
+                                                                {r.reference_type && <span className="text-[9px] uppercase tracking-tighter opacity-50">{r.reference_type} — {r.reference_id?.slice(-6)}</span>}
                                                             </td>
-                                                            <td style={{ fontWeight: 500, maxWidth: 280 }}>
-                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.particular}</div>
-                                                                {r.reference_type && (
-                                                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }}>
-                                                                        {r.reference_type.toUpperCase()}
-                                                                    </div>
-                                                                )}
+                                                            <td className="text-center">
+                                                                <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 6px', borderRadius: 4, background: `${curCol}15`, color: curCol }}>{r.currency}</span>
                                                             </td>
-                                                            <td>
-                                                                <span style={{
-                                                                    fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-                                                                    background: `${curCol}15`, color: curCol
-                                                                }}>{r.currency}</span>
-                                                            </td>
-                                                            {/* credit = money going out (paid/distributed) → negative sign */}
-                                                            <td style={{ textAlign: 'right', fontWeight: 600, color: r.credit > 0 ? cfg.creditColor : 'var(--text-muted)' }}>
-                                                                {r.credit > 0 ? `−${fmt(r.credit)}` : '—'}
-                                                            </td>
-                                                            {/* debit = money received (deposited/total) → positive sign */}
-                                                            <td style={{ textAlign: 'right', fontWeight: 600, color: r.debit > 0 ? cfg.debitColor : 'var(--text-muted)' }}>
+                                                            <td className={`text-right font-bold ${r.debit > 0 ? 'text-[#4a9eff]' : 'text-gray-600 opacity-20'}`}>
                                                                 {r.debit > 0 ? `+${fmt(r.debit)}` : '—'}
                                                             </td>
-                                                            <td style={{ textAlign: 'right', fontWeight: 700, color: balCol }}>
-                                                                {r.runningBalance >= 0 ? '+' : '−'}{fmt(Math.abs(r.runningBalance))} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.currency}</span>
+                                                            <td className={`text-right font-bold ${r.credit > 0 ? 'text-[#ef4444]' : 'text-gray-600 opacity-20'}`}>
+                                                                {r.credit > 0 ? `−${fmt(r.credit)}` : '—'}
+                                                            </td>
+                                                            <td className={`text-right font-black ${balCol}`}>
+                                                                {r.runningBalance >= 0 ? '+' : ''}{fmt(r.runningBalance)} <span className="text-[9px] opacity-40">{r.currency}</span>
                                                             </td>
                                                         </tr>
                                                     );

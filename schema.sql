@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   distributor_id TEXT,
   distributor_name TEXT,
   profit_inr REAL,
-  edit_pending_approval INTEGER DEFAULT 0
+  edit_pending_approval INTEGER DEFAULT 0,
+  is_petty_cash INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS agents (
