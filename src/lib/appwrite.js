@@ -100,6 +100,7 @@ export const dbService = {
     },
     async createAgent(data) { return fetchApi('/agents', { method: 'POST', body: JSON.stringify(data) }); },
     async updateAgent(id, data) { return fetchApi(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
+    async getAgent(id) { return fetchApi(`/agents/${id}`); },
     async deleteAgent(id) { return fetchApi(`/agents/${id}`, { method: 'DELETE' }); },
 
     // Employees
