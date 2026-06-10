@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { dbService, authService } from '../lib/appwrite';
 import { RefreshCw, CheckCircle, AlertTriangle, Play, Database, Trash2 } from 'lucide-react';
+import { isBusinessAdmin } from '../utils/roles';
 
 export default function ReconciliationPage() {
     const [loading, setLoading] = useState(false);
@@ -559,7 +560,7 @@ export default function ReconciliationPage() {
         }
     };
 
-    if (user?.role !== 'admin') {
+    if (!isBusinessAdmin(user?.role)) {
         return <Layout title="Access Denied"><div className="card">You do not have permission to access this page.</div></Layout>;
     }
 

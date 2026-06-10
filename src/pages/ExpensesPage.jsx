@@ -32,7 +32,6 @@ const TYPE_OPTIONS = [
 
 export default function ExpensesPage() {
     const [expenses, setExpenses] = useState([]);
-    const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [form, setForm] = useState(EMPTY);

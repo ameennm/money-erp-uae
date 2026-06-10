@@ -11,11 +11,13 @@ import { format } from 'date-fns';
 // Filter components
 import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
 import { applyDateRange } from '../utils/filterHelpers';
+import { isBusinessAdmin } from '../utils/roles';
 
 const EMPTY_CREDIT = { from_person: '', reason: '', amount_sar: '' };
 
 export default function CreditsPage() {
     const { role } = useAuth();
+    const canApprove = isBusinessAdmin(role);
     const [credits, setCredits] = useState([]);
     const [txs, setTxs] = useState([]);     // for "total sent" calc
     const [loading, setLoading] = useState(true);
@@ -50,7 +52,7 @@ export default function CreditsPage() {
                 reason: form.reason,
                 amount_sar: parseFloat(form.amount_sar) || 0,
                 date: format(new Date(), 'yyyy-MM-dd'),
-                admin_approved: role === 'admin',
+                admin_approved: canApprove,
             };
             const created = await dbService.createCredit(payload);
             toast.success('Credit recorded');
@@ -178,7 +180,7 @@ export default function CreditsPage() {
                                         </td>
                                         <td>
                                             <div className="flex gap-2">
-                                                {role === 'admin' && !c.admin_approved && (
+                                                {canApprove && !c.admin_approved && (
                                                     <button className="btn btn-outline btn-sm" style={{ padding: '4px 8px', fontSize: '11px' }}
                                                         onClick={async () => {
                                                             await dbService.updateCredit(c.$id, { admin_approved: true });

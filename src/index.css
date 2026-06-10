@@ -344,6 +344,96 @@ textarea {
   margin-bottom: 32px;
 }
 
+.stats-grid.dashboard-stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-stat-card {
+  min-width: 0;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.dashboard-stat-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dashboard-stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--stat-color) 15%, transparent);
+  color: var(--stat-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 48px;
+}
+
+.dashboard-stat-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.dashboard-stat-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dashboard-stat-value {
+  color: var(--stat-color);
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: clamp(22px, 1.8vw, 28px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.dashboard-stat-number {
+  display: block;
+  min-width: 0;
+}
+
+.dashboard-stat-currency {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.8;
+}
+
+@media (max-width: 1120px) {
+  .stats-grid.dashboard-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-stat-value {
+    font-size: clamp(20px, 2.5vw, 26px);
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-grid.dashboard-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .stat-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);

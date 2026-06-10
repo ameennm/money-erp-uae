@@ -66,7 +66,13 @@ export default function ReportsPage() {
                     credit: 0,
                     debit: Number(tx.actual_inr_distributed),
                     agent: tx.distributor_name || '',
-                    notes: tx.notes || '',
+                    rate: tx.collection_rate || '',
+                    notes: [
+                        tx.collection_rate ? `Customer rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
+                        tx.sar_to_aed_rate ? `SAR→AED: ${tx.sar_to_aed_rate}` : '',
+                        tx.aed_to_inr_rate ? `AED→INR: ${tx.aed_to_inr_rate}` : '',
+                        tx.notes || ''
+                    ].filter(Boolean).join(' | '),
                 });
             }
         });
@@ -120,7 +126,8 @@ export default function ReportsPage() {
                     credit: 0,
                     debit: Number(c.sar_amount) || 0,
                     agent: c.conversion_agent_name || '',
-                    notes: `Rate: ${c.sar_rate || ''}`,
+                    rate: c.sar_rate || c.aed_rate || '',
+                    notes: `Rate: ${c.sar_rate || c.aed_rate || ''}`,
                 });
 
                 // AED In (Credit)
@@ -134,6 +141,7 @@ export default function ReportsPage() {
                     credit: Number(c.aed_amount) || 0,
                     debit: 0,
                     agent: c.conversion_agent_name || '',
+                    rate: c.sar_rate || c.aed_rate || '',
                     notes: `Converted from ${Number(c.sar_amount) || 0} SAR`,
                 });
             });
@@ -209,6 +217,7 @@ export default function ReportsPage() {
             'TX ID': r.txId || '',
             'Type': r._type.charAt(0).toUpperCase() + r._type.slice(1),
             'Currency': r.currency,
+            'Rate': r.rate || '',
             'Credit': r.credit || '',
             'Debit': r.debit || '',
             'Agent': r.agent || '',

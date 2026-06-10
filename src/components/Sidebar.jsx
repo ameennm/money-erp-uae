@@ -13,7 +13,21 @@ const NAV = {
         { label: 'Agents', path: '/agents', icon: Users },
         { label: 'Distributors', path: '/distributors', icon: UserCog },
         { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
+        { label: 'Data Export', path: '/data-export', icon: Database },
         { label: 'Activity Logs', path: '/activity-logs', icon: Activity },
+        { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
+        { label: 'Reconciliation', path: '/reconciliation', icon: Database },
+        { label: 'Settings', path: '/settings', icon: Settings },
+    ],
+    employee: [
+        { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
+        { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
+        { label: 'Conversion Agents', path: '/conversion-agents', icon: RefreshCw },
+        { label: 'Agents', path: '/agents', icon: Users },
+        { label: 'Distributors', path: '/distributors', icon: UserCog },
+        { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
+        { label: 'Credits', path: '/credits', icon: Wallet },
+        { label: 'Data Export', path: '/data-export', icon: Database },
         { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
         { label: 'Reconciliation', path: '/reconciliation', icon: Database },
         { label: 'Settings', path: '/settings', icon: Settings },
@@ -32,6 +46,7 @@ const NAV = {
 
 const ROLE_COLOR = {
     admin: '#f5a623',
+    employee: '#00c896',
     collector: '#4a9eff',
 };
 

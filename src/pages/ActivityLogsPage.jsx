@@ -5,80 +5,20 @@ import toast from 'react-hot-toast';
 import { Download, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
-import { SearchInput } from '../components/filters';
+import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
+import { applyDateRange } from '../utils/filterHelpers';
 
 export default function ActivityLogsPage() {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
 
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ex, ac, cr] = await Promise.all([
-                dbService.listTransactions(),
-                dbService.listExpenses(),
-                dbService.listAedConversions(),
-                dbService.listCredits()
-            ]);
-
-            const allLogs = [];
-
-            // 1. Transactions
-            t.documents.forEach(tx => {
-                allLogs.push({
-                    id: tx.$id,
-                    date: tx.$createdAt,
-                    type: 'Transaction',
-                    title: `Transaction #${tx.tx_id} — ${tx.client_name}`,
-                    description: `Status: ${tx.status} | Agent: ${tx.collection_agent_name || '—'}`,
-                    amount: `${Number(tx.collected_amount || 0).toLocaleString('en-IN')} ${tx.collected_currency}`,
-                    tagColor: 'var(--status-completed)',
-                });
-            });
-
-            // 2. Expenses / Incomes / Deposits
-            ex.documents.forEach(e => {
-                const isInc = e.type === 'income';
-                allLogs.push({
-                    id: e.$id,
-                    date: e.$createdAt,
-                    type: isInc ? 'Income' : 'Expense',
-                    title: e.title || e.category,
-                    description: `${e.notes || ''} ${e.distributor_name ? `| Distributor: ${e.distributor_name}` : ''}`,
-                    amount: `${isInc ? '+' : '-'}${Number(e.amount || 0).toLocaleString('en-IN')} ${e.currency}`,
-                    tagColor: isInc ? 'var(--brand-accent)' : 'var(--status-failed)',
-                });
-            });
-
-            // 3. Conversions
-            ac.documents.forEach(c => {
-                allLogs.push({
-                    id: c.$id,
-                    date: c.$createdAt || c.date,
-                    type: 'Conversion',
-                    title: `SAR → AED Conversion`,
-                    description: `Agent: ${c.conversion_agent_name} | Rate: ${c.sar_rate || '—'}`,
-                    amount: `${Number(c.sar_amount || 0).toLocaleString()} SAR → ${Number(c.aed_amount || 0).toLocaleString()} AED`,
-                    tagColor: 'var(--brand-gold)',
-                });
-            });
-
-            // 4. Credits
-            cr.documents.forEach(c => {
-                allLogs.push({
-                    id: c.$id,
-                    date: c.$createdAt,
-                    type: 'Credit',
-                    title: `Customer Credit - ${c.from_person}`,
-                    description: c.reason || '',
-                    amount: `${Number(c.amount_sar || 0).toLocaleString()} SAR`,
-                    tagColor: '#a78bfa',
-                });
-            });
-
-            allLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
-            setLogs(allLogs);
+            const res = await dbService.listActivityLogs();
+            setLogs(res.documents);
         } catch (e) {
             toast.error('Failed to load logs: ' + e.message);
         } finally {
@@ -88,20 +28,30 @@ export default function ActivityLogsPage() {
 
     useEffect(() => { fetchAll(); }, []);
 
-    const filtered = logs.filter(L =>
-        L.title.toLowerCase().includes(search.toLowerCase()) ||
-        (L.description && L.description.toLowerCase().includes(search.toLowerCase())) ||
-        L.type.toLowerCase().includes(search.toLowerCase())
-    );
+    const filtered = applyDateRange(logs, dateRange.range, dateRange.customFrom, dateRange.customTo)
+        .filter(log => {
+            const term = search.toLowerCase();
+            return !term ||
+                log.actor_name?.toLowerCase().includes(term) ||
+                log.actor_email?.toLowerCase().includes(term) ||
+                log.actor_role?.toLowerCase().includes(term) ||
+                log.action?.toLowerCase().includes(term) ||
+                log.entity_type?.toLowerCase().includes(term) ||
+                log.entity_label?.toLowerCase().includes(term);
+        });
 
     const exportToExcel = () => {
         const rows = filtered.map((r, i) => ({
             '#': i + 1,
-            'Date': format(new Date(r.date), 'dd MMM yyyy HH:mm'),
-            'Type': r.type,
-            'Title': r.title,
-            'Amount': r.amount,
-            'Description': r.description || ''
+            'Date': r.$createdAt ? format(new Date(r.$createdAt), 'dd MMM yyyy HH:mm') : '',
+            'Actor': r.actor_name || '',
+            'Email': r.actor_email || '',
+            'Role': r.actor_role || '',
+            'Action': r.action || '',
+            'Entity': r.entity_type || '',
+            'Record': r.entity_label || '',
+            'Record ID': r.entity_id || '',
+            'Details': r.details || ''
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
         const wb = XLSX.utils.book_new();
@@ -111,15 +61,19 @@ export default function ActivityLogsPage() {
 
     return (
         <Layout title="Activity Logs">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <FilterBar>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
                 <SearchInput
                     value={search}
                     onChange={setSearch}
-                    placeholder="Search logs..."
+                    placeholder="Search actor, action, table..."
                     style={{ maxWidth: 400 }}
                 />
                 <button className="btn btn-outline" onClick={exportToExcel}><Download size={16} /> Export Excel</button>
-            </div>
+            </FilterBar>
 
             {loading ? (
                 <div className="loading-screen" style={{ minHeight: '60vh' }}>
@@ -137,29 +91,36 @@ export default function ActivityLogsPage() {
                             <thead>
                                 <tr>
                                     <th>Date</th>
-                                    <th>Type</th>
-                                    <th>Title</th>
-                                    <th>Amount</th>
-                                    <th>Description</th>
+                                    <th>Actor</th>
+                                    <th>Action</th>
+                                    <th>Entity</th>
+                                    <th>Record</th>
+                                    <th>Details</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filtered.map((log, i) => (
                                     <tr key={`${log.id}-${i}`}>
                                         <td style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                                            {format(new Date(log.date), 'dd MMM yy HH:mm')}
+                                            {log.$createdAt ? format(new Date(log.$createdAt), 'dd MMM yy HH:mm') : '—'}
+                                        </td>
+                                        <td>
+                                            <div style={{ fontWeight: 700 }}>{log.actor_name || 'System'}</div>
+                                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{log.actor_email || log.actor_role || '—'}</div>
                                         </td>
                                         <td>
                                             <span style={{
                                                 fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-                                                background: `${log.tagColor}15`, color: log.tagColor, border: `1px solid ${log.tagColor}40`
+                                                background: 'rgba(74,158,255,0.15)', color: '#4a9eff', border: '1px solid rgba(74,158,255,0.35)'
                                             }}>
-                                                {log.type}
+                                                {log.action}
                                             </span>
                                         </td>
-                                        <td style={{ fontWeight: 600 }}>{log.title}</td>
-                                        <td style={{ fontWeight: 700 }}>{log.amount}</td>
-                                        <td style={{ color: 'var(--text-muted)' }}>{log.description}</td>
+                                        <td style={{ color: 'var(--text-secondary)' }}>{log.entity_type}</td>
+                                        <td style={{ fontWeight: 600 }}>{log.entity_label || log.entity_id}</td>
+                                        <td style={{ color: 'var(--text-muted)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {log.details || '—'}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

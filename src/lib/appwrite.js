@@ -1,11 +1,27 @@
 // ─── Cloudflare Workers API Wrapper ───────────────────────────────────────────
 const API_BASE = '/api';
 
+const getStoredUser = () => {
+    try {
+        const userStr = localStorage.getItem('currentUser');
+        return userStr ? JSON.parse(userStr) : null;
+    } catch {
+        return null;
+    }
+};
+
 const fetchApi = async (path, options = {}) => {
+    const currentUser = getStoredUser();
     const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
             'Content-Type': 'application/json',
+            ...(currentUser ? {
+                'x-user-id': currentUser.$id || currentUser.id || '',
+                'x-user-name': currentUser.name || currentUser.email || '',
+                'x-user-email': currentUser.email || '',
+                'x-user-role': currentUser.role || '',
+            } : {}),
             ...options.headers,
         },
     });
@@ -42,17 +58,11 @@ export const authService = {
         localStorage.removeItem('currentUser');
     },
     async getCurrentUser() {
-        try {
-            const userStr = localStorage.getItem('currentUser');
-            if (userStr) return JSON.parse(userStr);
-            return null;
-        } catch {
-            return null;
-        }
+        return getStoredUser();
     },
     async createEmployee(email, _password, name) {
         // Technically mapped to dbService.createEmployee
-        const res = await dbService.createEmployee({ email, name, role: 'collector', notes: '' });
+        const res = await dbService.createEmployee({ email, name, password: _password, role: 'employee', notes: '' });
         return res;
     },
 };
@@ -136,6 +146,7 @@ export const dbService = {
         return applyQueries(data, q);
     },
     async createAedConversion(data) { return fetchApi('/aed_conversions', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateAedConversion(id, data) { return fetchApi(`/aed_conversions/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
     async deleteAedConversion(id) { return fetchApi(`/aed_conversions/${id}`, { method: 'DELETE' }); },
 
     // Settings (single global doc)
@@ -158,4 +169,12 @@ export const dbService = {
     async createLedgerEntry(data) { return fetchApi('/ledger_entries', { method: 'POST', body: JSON.stringify(data) }); },
     async updateLedgerEntry(id, data) { return fetchApi(`/ledger_entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
     async deleteLedgerEntry(id) { return fetchApi(`/ledger_entries/${id}`, { method: 'DELETE' }); },
+
+    // Activity Logs
+    async listActivityLogs(q = []) {
+        const data = await fetchApi('/activity_logs');
+        return applyQueries(data, q);
+    },
+    async createActivityLog(data) { return fetchApi('/activity_logs', { method: 'POST', body: JSON.stringify(data) }); },
+    async updateActivityLog(id, data) { return fetchApi(`/activity_logs/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
 };

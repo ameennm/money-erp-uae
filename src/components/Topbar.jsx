@@ -6,11 +6,13 @@ export default function Topbar({ title, onMenuToggle }) {
 
     const roleColors = {
         admin: 'badge-admin',
+        employee: 'badge-employee',
         collector: 'badge-collector',
     };
 
     const roleLabels = {
         admin: 'Admin',
+        employee: 'Employee',
         collector: 'Collector',
     };
 

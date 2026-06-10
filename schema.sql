@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS employees (
   name TEXT,
   email TEXT,
   role TEXT,
+  password_hash TEXT,
+  password_salt TEXT,
   notes TEXT
 );
 
@@ -88,7 +90,11 @@ CREATE TABLE IF NOT EXISTS aed_conversions (
   profit_inr REAL,
   conversion_agent_id TEXT,
   conversion_agent_name TEXT,
-  date TEXT
+  date TEXT,
+  sar_rate REAL,
+  aed_rate REAL,
+  source_currency TEXT,
+  target_currency TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -113,4 +119,19 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   running_balance REAL,
   createdAt TEXT,
   updatedAt TEXT
+);
+
+CREATE TABLE IF NOT EXISTS activity_logs (
+  id TEXT PRIMARY KEY,
+  createdAt TEXT,
+  updatedAt TEXT,
+  actor_id TEXT,
+  actor_name TEXT,
+  actor_email TEXT,
+  actor_role TEXT,
+  action TEXT,
+  entity_type TEXT,
+  entity_id TEXT,
+  entity_label TEXT,
+  details TEXT
 );

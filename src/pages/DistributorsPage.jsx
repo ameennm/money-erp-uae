@@ -13,7 +13,6 @@ const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: '
 
 export default function DistributorsPage() {
     const [distributors, setDistributors] = useState([]);
-    const [txs, setTxs] = useState([]);
     const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
@@ -34,13 +33,11 @@ export default function DistributorsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [dr, tr, ex] = await Promise.all([
+            const [dr, ex] = await Promise.all([
                 dbService.listAgents([Query.equal('type', 'distributor')]),
-                dbService.listTransactions(),
                 dbService.listExpenses(),
             ]);
             setDistributors(dr.documents);
-            setTxs(tr.documents);
             setExpenseRecs(ex.documents);
         } catch (e) {
             toast.error(e.message);

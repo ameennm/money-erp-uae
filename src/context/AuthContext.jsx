@@ -5,20 +5,25 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
-    const [role, setRole] = useState(null); // 'admin' | 'collector'
+    const [role, setRole] = useState(null); // 'admin' | 'employee' | 'collector'
     const [loading, setLoading] = useState(true);
 
     const detectRole = (email) => {
         if (!email) return null;
         if (email.includes('admin')) return 'admin';
         if (email.includes('collector')) return 'collector';
-        return 'admin'; // fallback
+        return 'employee';
+    };
+
+    const resolveRole = (u) => {
+        if (!u) return null;
+        return u.role || detectRole(u.email);
     };
 
     useEffect(() => {
         authService.getCurrentUser().then((u) => {
             setUser(u);
-            setRole(detectRole(u?.email));
+            setRole(resolveRole(u));
             setLoading(false);
         });
     }, []);
@@ -27,7 +32,7 @@ export function AuthProvider({ children }) {
         await authService.login(email, password);
         const u = await authService.getCurrentUser();
         setUser(u);
-        setRole(detectRole(u?.email));
+        setRole(resolveRole(u));
         return u;
     };
 

@@ -13,6 +13,7 @@ import * as XLSX from 'xlsx';
 // Filter components
 import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
 import { applyDateRange, round2 } from '../utils/filterHelpers';
+import { isBusinessAdmin } from '../utils/roles';
 import { TRANSACTION_STATUSES } from '../constants';
 
 const START_TX_NUM = 20261;
@@ -55,7 +56,7 @@ const EMPTY = {
 
 export default function TransactionsPage() {
     const { role, user } = useAuth();
-    const isAdmin = role === 'admin';
+    const isAdmin = isBusinessAdmin(role);
     const isCollector = role === 'collector' || isAdmin;
     const isCollectorOnly = role === 'collector';
 
@@ -363,11 +364,17 @@ export default function TransactionsPage() {
             'Client Name': tx.client_name || '',
             'INR Requested': tx.inr_requested || 0,
             'Collected Currency': tx.collected_currency || '',
-            'Collection Rate': tx.collection_rate || '',
+            'Customer Rate (per 1000 INR)': tx.collection_rate || '',
+            'Current Business Minimum Rate': tx.collected_currency === 'AED' ? (settings.min_aed_rate || '') : (settings.min_sar_rate || ''),
             'Amount Collected': tx.collected_amount || 0,
             'Collection Agent': tx.collection_agent_name || '',
+            'Conversion Agent': tx.conversion_agent_name || '',
+            'SAR to AED Rate': tx.sar_to_aed_rate || '',
+            'Actual AED': tx.actual_aed || '',
+            'AED to INR Rate': tx.aed_to_inr_rate || '',
             'Distributor': tx.distributor_name || '',
             'INR Distributed': tx.actual_inr_distributed || 0,
+            'Profit AED': tx.profit_aed || 0,
             'Profit INR': tx.profit_inr || 0,
             'Status': tx.status || '',
             'Notes': tx.notes || '',

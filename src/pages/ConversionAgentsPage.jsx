@@ -8,6 +8,7 @@ import {
     Plus, X, Pencil, Trash2, RefreshCw, List, Banknote
 } from 'lucide-react';
 import { SearchInput } from '../components/filters';
+import { canOperate } from '../utils/roles';
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED', sar_balance: 0, aed_balance: 0 };
 const CONV_TYPES = [
@@ -181,6 +182,19 @@ export default function ConversionAgentsPage() {
                 distributor_name: activeAgent.name
             };
             const createdExpense = await dbService.createExpense(expensePayload);
+
+            await dbService.createAedConversion({
+                sar_amount: activeAgent.type === 'conversion_sar' ? amtSource : null,
+                aed_amount: activeAgent.type === 'conversion_sar' ? targetAmt : amtSource,
+                profit_inr: activeAgent.type === 'conversion_aed' ? targetAmt : null,
+                conversion_agent_id: activeAgent.$id,
+                conversion_agent_name: activeAgent.name,
+                date: new Date().toISOString().split('T')[0],
+                sar_rate: activeAgent.type === 'conversion_sar' ? rate : null,
+                aed_rate: activeAgent.type === 'conversion_aed' ? rate : null,
+                source_currency: balCur,
+                target_currency: incomeCur,
+            });
 
             await ledgerService.recordEntry({
                 agent: activeAgent,
@@ -418,7 +432,7 @@ export default function ConversionAgentsPage() {
                                         <input className="form-input" placeholder="+966 5X XXX XXXX"
                                             value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                                     </div>
-                                    {(user?.role === 'admin' || user?.role === 'collector') && (
+                                    {canOperate(user?.role) && (
                                         <div className="form-group" style={{ flex: 1 }}>
                                             <label className="form-label">Balance ({form.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
                                             <input className="form-input" type="number" step="any"

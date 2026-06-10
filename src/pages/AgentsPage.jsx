@@ -4,15 +4,15 @@ import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
 import toast from 'react-hot-toast';
-import { Plus, X, Pencil, Trash2, Users, MapPin, Banknote } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Users, Banknote } from 'lucide-react';
 import { SearchInput } from '../components/filters';
 import { round2 } from '../utils/filterHelpers';
+import { canOperate } from '../utils/roles';
 
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection', sar_balance: 0, aed_balance: 0 };
 
 export default function AgentsPage() {
     const [agents, setAgents] = useState([]);
-    const [txs, setTxs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
     const [viewingAgent, setViewingAgent] = useState(null);
@@ -28,12 +28,8 @@ export default function AgentsPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const [ar, tr] = await Promise.all([
-                dbService.listAgents(), // Fetch all agents for universal search
-                dbService.listTransactions(),
-            ]);
+            const ar = await dbService.listAgents(); // Fetch all agents for universal search
             setAgents(ar.documents);
-            setTxs(tr.documents);
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -150,9 +146,6 @@ export default function AgentsPage() {
     const sarCredits = agents.filter(a => a.currency !== 'AED').reduce((s, a) => s + Math.abs(Math.min(0, a.sar_balance || 0)), 0);
     const aedDebits = agents.filter(a => a.currency === 'AED').reduce((s, a) => s + Math.max(0, a.aed_balance || 0), 0);
     const aedCredits = agents.filter(a => a.currency === 'AED').reduce((s, a) => s + Math.abs(Math.min(0, a.aed_balance || 0)), 0);
-
-    const totalCollectedSar = round2(txs.filter(t => (t.collected_currency || 'SAR') === 'SAR').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
-    const totalCollectedAed = round2(txs.filter(t => t.collected_currency === 'AED').reduce((s, t) => s + (Number(t.collected_amount) || 0), 0));
 
     return (
         <Layout title="Agents">
@@ -354,7 +347,7 @@ export default function AgentsPage() {
                                             <option value="AED">AED</option>
                                         </select>
                                     </div>
-                                    {(user?.role === 'admin' || user?.role === 'collector') && (
+                                    {canOperate(user?.role) && (
                                         <div className="form-group">
                                             <label className="form-label">
                                                 Manual Balance Adjustment ({form.currency})
@@ -399,7 +392,6 @@ export default function AgentsPage() {
                 const cur = paymentAgent.currency || 'SAR';
                 const owedField = cur === 'AED' ? 'aed_balance' : 'sar_balance';
                 const owed = round2(paymentAgent[owedField] || 0);
-                const amt = parseFloat(paymentAmount) || 0;
                 return (
                     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPaymentModal(false)}>
                         <div className="modal" style={{ maxWidth: 500, width: '95%' }}>

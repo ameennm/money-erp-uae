@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { dbService, Query } from '../lib/appwrite';
 import { X, Download, FileSpreadsheet, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
@@ -9,45 +9,74 @@ import { applyDateRange, createSearchMatcher } from '../utils/filterHelpers';
 
 const fmt = (n) => (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
+const transactionRefId = (referenceId = '') => String(referenceId).replace(/_(coll|dist|conv)$/, '');
+
+const formatTransactionRates = (tx) => {
+    if (!tx) return '';
+    return [
+        tx.collection_rate ? `Customer: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
+        tx.sar_to_aed_rate ? `SAR→AED: ${tx.sar_to_aed_rate}` : '',
+        tx.aed_to_inr_rate ? `AED→INR: ${tx.aed_to_inr_rate}` : '',
+    ].filter(Boolean).join(' | ');
+};
+
 export default function LedgerModal({ agent, onClose }) {
     const [entries, setEntries] = useState([]);
+    const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [currencyFilter, setCurrencyFilter] = useState('All');
     const [search, setSearch] = useState('');
     const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
     
-    const fetchEntries = async () => {
+    const fetchEntries = useCallback(async () => {
+        if (!agent) return;
         setLoading(true);
         try {
-            const res = await dbService.listLedgerEntries([
-                Query.equal('agent_id', agent.$id),
-                Query.orderDesc('createdAt'),
+            const [ledgerRes, txRes] = await Promise.all([
+                dbService.listLedgerEntries([
+                    Query.equal('agent_id', agent.$id),
+                    Query.orderDesc('createdAt'),
+                ]),
+                dbService.listTransactions(),
             ]);
-            setEntries(res.documents);
+            setEntries(ledgerRes.documents);
+            setTransactions(txRes.documents);
         } catch (e) {
             toast.error('Failed to load: ' + e.message);
         } finally {
             setLoading(false);
         }
-    };
-
-    useEffect(() => {
-        if (agent) fetchEntries();
     }, [agent]);
 
+    useEffect(() => {
+        fetchEntries();
+    }, [fetchEntries]);
+
+    const transactionById = useMemo(() => {
+        return new Map(transactions.map(tx => [tx.$id, tx]));
+    }, [transactions]);
+
     const allEntries = useMemo(() => {
-        return entries.map(e => ({
-            _id: e.$id,
-            _date: e.createdAt,
-            _type: e.type,
-            particular: e.description,
-            reference_type: e.reference_type,
-            reference_id: e.reference_id,
-            currency: e.currency,
-            credit: e.type === 'credit' ? Number(e.amount) : 0,
-            debit: e.type === 'debit' ? Number(e.amount) : 0,
-        }));
-    }, [entries]);
+        return entries.map(e => {
+            const tx = e.reference_type === 'transaction'
+                ? transactionById.get(transactionRefId(e.reference_id))
+                : null;
+
+            return {
+                _id: e.$id,
+                _date: e.createdAt,
+                _type: e.type,
+                particular: e.description,
+                reference_type: e.reference_type,
+                reference_id: e.reference_id,
+                txId: tx?.tx_id || '',
+                conversionRate: formatTransactionRates(tx),
+                currency: e.currency,
+                credit: e.type === 'credit' ? Number(e.amount) : 0,
+                debit: e.type === 'debit' ? Number(e.amount) : 0,
+            };
+        });
+    }, [entries, transactionById]);
 
     const allEntriesWithBalance = useMemo(() => {
         const sorted = [...allEntries].sort((a, b) => new Date(a._date) - new Date(b._date));
@@ -98,13 +127,20 @@ export default function LedgerModal({ agent, onClose }) {
         const rows = filtered.map((r, i) => ({
             '#': filtered.length - i,
             'Date': r._date ? format(new Date(r._date), 'dd-MM-yyyy HH:mm') : '',
+            'TX ID': r.txId || '',
             'Particular': r.particular,
+            'Conversion Rate Given': r.conversionRate || '',
             'Business Debit': r.debit || '',
             'Business Credit': r.credit || '',
             'Currency': r.currency,
             'Net Balance': r.runningBalance,
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
+        if (rows.length > 0) {
+            ws['!cols'] = Object.keys(rows[0]).map(key => ({
+                wch: Math.min(50, Math.max(key.length, ...rows.map(r => String(r[key] ?? '').length)) + 2)
+            }));
+        }
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, `${agent.name}_Ledger`);
         XLSX.writeFile(wb, `Business_Ledger_${agent.name}.xlsx`);

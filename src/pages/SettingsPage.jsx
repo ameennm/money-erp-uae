@@ -4,9 +4,11 @@ import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { Settings, Save, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
+import { isBusinessAdmin } from '../utils/roles';
 
 export default function SettingsPage() {
     const { role } = useAuth();
+    const canManageSettings = isBusinessAdmin(role);
     const isAdmin = role === 'admin';
 
     const [minSarRate, setMinSarRate] = useState('');
@@ -94,7 +96,7 @@ export default function SettingsPage() {
         }
     };
 
-    if (!isAdmin) {
+    if (!canManageSettings) {
         return (
             <Layout title="Settings">
                 <div className="empty-state card">
@@ -214,26 +216,27 @@ export default function SettingsPage() {
                     </form>
                 )}
 
-                {/* Danger Zone */}
-                <div className="card" style={{ marginTop: 40, padding: 24, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                        <AlertTriangle size={18} color="#ef4444" />
-                        <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 15 }}>Danger Zone</span>
+                {isAdmin && (
+                    <div className="card" style={{ marginTop: 40, padding: 24, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                            <AlertTriangle size={18} color="#ef4444" />
+                            <span style={{ fontWeight: 700, color: '#ef4444', fontSize: 15 }}>Danger Zone</span>
+                        </div>
+                        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+                            Permanently deletes <strong>all transactions, expenses, AED conversions, and credits</strong>.
+                            Also resets all agent and distributor balances to zero. Use this only when starting fresh.
+                        </p>
+                        <button
+                            type="button"
+                            className="btn"
+                            style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 700 }}
+                            onClick={wipeAllData}
+                            disabled={wiping}
+                        >
+                            <Trash2 size={15} /> {wiping ? 'Wiping… please wait' : 'Wipe All Data'}
+                        </button>
                     </div>
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
-                        Permanently deletes <strong>all transactions, expenses, AED conversions, and credits</strong>.
-                        Also resets all agent and distributor balances to zero. Use this only when starting fresh.
-                    </p>
-                    <button
-                        type="button"
-                        className="btn"
-                        style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 700 }}
-                        onClick={wipeAllData}
-                        disabled={wiping}
-                    >
-                        <Trash2 size={15} /> {wiping ? 'Wiping… please wait' : 'Wipe All Data'}
-                    </button>
-                </div>
+                )}
             </div>
         </Layout>
     );
