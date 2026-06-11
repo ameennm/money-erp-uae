@@ -10,10 +10,10 @@ import { applyDateRange, round2 } from '../utils/filterHelpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-    const [txs, setTxs] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [aedConversions, setAedConversions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -24,12 +24,10 @@ export default function DashboardPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ex, ac] = await Promise.all([
-                dbService.listTransactions(),
+            const [ex, ac] = await Promise.all([
                 dbService.listExpenses(),
                 dbService.listAedConversions(),
             ]);
-            setTxs(t.documents);
             setExpenses(ex.documents);
             setAedConversions(ac.documents);
         } catch (e) { console.error(e); toast.error('Error loading dashboard'); }
@@ -41,30 +39,7 @@ export default function DashboardPage() {
     const allEntries = useMemo(() => {
         const entries = [];
 
-        txs.forEach(tx => {
-            const distributedInr = Number(tx.actual_inr_distributed) || 0;
-            const collectedInr = tx.collected_currency === 'INR' ? Number(tx.collected_amount) || 0 : 0;
-
-            if (tx.status === 'completed' && distributedInr > 0) {
-                entries.push({
-                    _date: tx.$updatedAt || tx.$createdAt,
-                    currency: 'INR',
-                    credit: 0,
-                    debit: distributedInr,
-                });
-            }
-
-            if (tx.status === 'completed' && collectedInr !== 0 && distributedInr <= 0) {
-                entries.push({
-                    _date: tx.$updatedAt || tx.$createdAt,
-                    currency: 'INR',
-                    credit: collectedInr > 0 ? collectedInr : 0,
-                    debit: collectedInr < 0 ? Math.abs(collectedInr) : 0,
-                });
-            }
-        });
-
-        expenses.filter(e => e.type === 'income').forEach(e => {
+        expenses.filter(e => e.type === 'income' && !isInternalLedgerTransfer(e)).forEach(e => {
             entries.push({
                 _date: e.$createdAt,
                 currency: e.currency || 'AED',
@@ -74,7 +49,7 @@ export default function DashboardPage() {
         });
 
         expenses
-            .filter(e => e.type !== 'income' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer')
+            .filter(e => e.type !== 'income' && !isInternalLedgerTransfer(e))
             .forEach(e => {
                 entries.push({
                     _date: e.$createdAt,
@@ -101,7 +76,7 @@ export default function DashboardPage() {
         });
 
         return entries;
-    }, [txs, expenses, aedConversions]);
+    }, [expenses, aedConversions]);
 
     const fLedger = useMemo(() => applyDateRange(allEntries, dateRange.range, dateRange.customFrom, dateRange.customTo, '_date'), [allEntries, dateRange]);
 

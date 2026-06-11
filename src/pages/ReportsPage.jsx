@@ -17,8 +17,9 @@ const TYPE_OPTIONS = [
     { value: 'expense', label: 'Expenses', color: 'var(--status-failed)' }
 ];
 
+const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
+
 export default function ReportsPage() {
-    const [txs, setTxs] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [aedConversions, setAedConversions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -32,12 +33,10 @@ export default function ReportsPage() {
     const fetchAll = async () => {
         setLoading(true);
         try {
-            const [t, ex, ac] = await Promise.all([
-                dbService.listTransactions(),
+            const [ex, ac] = await Promise.all([
                 dbService.listExpenses(),
                 dbService.listAedConversions(),
             ]);
-            setTxs(t.documents);
             setExpenses(ex.documents);
             setAedConversions(ac.documents);
         } catch (e) {
@@ -53,54 +52,8 @@ export default function ReportsPage() {
     const allEntries = useMemo(() => {
         const entries = [];
 
-        // Distribution (Debit in INR) - money leaving the system to customers!
-        txs.forEach(tx => {
-            const distributedInr = Number(tx.actual_inr_distributed) || 0;
-            const collectedInr = tx.collected_currency === 'INR' ? Number(tx.collected_amount) || 0 : 0;
-
-            if (tx.status === 'completed' && distributedInr > 0) {
-                entries.push({
-                    _type: 'transaction',
-                    _date: tx.$updatedAt || tx.$createdAt,
-                    _id: tx.$id + '_dist',
-                    particular: `${tx.client_name} — Distribution`,
-                    txId: tx.tx_id || '',
-                    currency: 'INR',
-                    credit: 0,
-                    debit: distributedInr,
-                    agent: tx.distributor_name || '',
-                    rate: tx.collection_rate || '',
-                    notes: [
-                        tx.collection_rate ? `Customer rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
-                        tx.sar_to_aed_rate ? `SAR→AED: ${tx.sar_to_aed_rate}` : '',
-                        tx.aed_to_inr_rate ? `AED→INR: ${tx.aed_to_inr_rate}` : '',
-                        tx.notes || ''
-                    ].filter(Boolean).join(' | '),
-                });
-            }
-
-            if (tx.status === 'completed' && collectedInr !== 0 && distributedInr <= 0) {
-                entries.push({
-                    _type: 'transaction',
-                    _date: tx.$updatedAt || tx.$createdAt,
-                    _id: tx.$id + '_inr_opening',
-                    particular: `${tx.client_name} — INR Opening Balance`,
-                    txId: tx.tx_id || '',
-                    currency: 'INR',
-                    credit: collectedInr > 0 ? collectedInr : 0,
-                    debit: collectedInr < 0 ? Math.abs(collectedInr) : 0,
-                    agent: tx.distributor_name || '',
-                    rate: tx.collection_rate || '',
-                    notes: [
-                        tx.collection_rate ? `Customer rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
-                        tx.notes || ''
-                    ].filter(Boolean).join(' | '),
-                });
-            }
-        });
-
         if (typeFilter.includes('income')) {
-            expenses.filter(e => e.type === 'income').forEach(e => {
+            expenses.filter(e => e.type === 'income' && !isInternalLedgerTransfer(e)).forEach(e => {
                 entries.push({
                     _type: 'income',
                     _date: e.$createdAt,
@@ -119,7 +72,7 @@ export default function ReportsPage() {
         if (typeFilter.includes('expense')) {
             // Exclude internal transfers/deposits to distributors since they are still inside the system
             expenses
-                .filter(e => e.type !== 'income' && e.category !== 'Distributor Deposit' && e.category !== 'Distributor Transfer')
+                .filter(e => e.type !== 'income' && !isInternalLedgerTransfer(e))
                 .forEach(e => {
                     entries.push({
                         _type: 'expense',
@@ -172,7 +125,7 @@ export default function ReportsPage() {
         // Sort by date ascending for ledger
         entries.sort((a, b) => new Date(a._date) - new Date(b._date));
         return entries;
-    }, [txs, expenses, aedConversions, typeFilter]);
+    }, [expenses, aedConversions, typeFilter]);
 
     // Apply filters
     const filtered = useMemo(() => {
