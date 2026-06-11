@@ -42,12 +42,24 @@ export default function DashboardPage() {
         const entries = [];
 
         txs.forEach(tx => {
-            if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
+            const distributedInr = Number(tx.actual_inr_distributed) || 0;
+            const collectedInr = tx.collected_currency === 'INR' ? Number(tx.collected_amount) || 0 : 0;
+
+            if (tx.status === 'completed' && distributedInr > 0) {
                 entries.push({
                     _date: tx.$updatedAt || tx.$createdAt,
                     currency: 'INR',
                     credit: 0,
-                    debit: Number(tx.actual_inr_distributed),
+                    debit: distributedInr,
+                });
+            }
+
+            if (tx.status === 'completed' && collectedInr !== 0 && distributedInr <= 0) {
+                entries.push({
+                    _date: tx.$updatedAt || tx.$createdAt,
+                    currency: 'INR',
+                    credit: collectedInr > 0 ? collectedInr : 0,
+                    debit: collectedInr < 0 ? Math.abs(collectedInr) : 0,
                 });
             }
         });

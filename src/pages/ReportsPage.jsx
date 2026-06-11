@@ -55,7 +55,10 @@ export default function ReportsPage() {
 
         // Distribution (Debit in INR) - money leaving the system to customers!
         txs.forEach(tx => {
-            if (tx.status === 'completed' && Number(tx.actual_inr_distributed) > 0) {
+            const distributedInr = Number(tx.actual_inr_distributed) || 0;
+            const collectedInr = tx.collected_currency === 'INR' ? Number(tx.collected_amount) || 0 : 0;
+
+            if (tx.status === 'completed' && distributedInr > 0) {
                 entries.push({
                     _type: 'transaction',
                     _date: tx.$updatedAt || tx.$createdAt,
@@ -64,13 +67,32 @@ export default function ReportsPage() {
                     txId: tx.tx_id || '',
                     currency: 'INR',
                     credit: 0,
-                    debit: Number(tx.actual_inr_distributed),
+                    debit: distributedInr,
                     agent: tx.distributor_name || '',
                     rate: tx.collection_rate || '',
                     notes: [
                         tx.collection_rate ? `Customer rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
                         tx.sar_to_aed_rate ? `SAR→AED: ${tx.sar_to_aed_rate}` : '',
                         tx.aed_to_inr_rate ? `AED→INR: ${tx.aed_to_inr_rate}` : '',
+                        tx.notes || ''
+                    ].filter(Boolean).join(' | '),
+                });
+            }
+
+            if (tx.status === 'completed' && collectedInr !== 0 && distributedInr <= 0) {
+                entries.push({
+                    _type: 'transaction',
+                    _date: tx.$updatedAt || tx.$createdAt,
+                    _id: tx.$id + '_inr_opening',
+                    particular: `${tx.client_name} — INR Opening Balance`,
+                    txId: tx.tx_id || '',
+                    currency: 'INR',
+                    credit: collectedInr > 0 ? collectedInr : 0,
+                    debit: collectedInr < 0 ? Math.abs(collectedInr) : 0,
+                    agent: tx.distributor_name || '',
+                    rate: tx.collection_rate || '',
+                    notes: [
+                        tx.collection_rate ? `Customer rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR` : '',
                         tx.notes || ''
                     ].filter(Boolean).join(' | '),
                 });
