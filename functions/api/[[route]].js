@@ -321,12 +321,27 @@ app.post('/transactions/with-ledger', async (c) => {
     await ensureOptionalSchema(c.env.DB)
     const body = await c.req.json()
     const transactionBody = body.transaction || {}
-    const ledgerEntries = Array.isArray(body.ledger_entries) ? body.ledger_entries : []
+    const rawLedgerEntries = Array.isArray(body.ledger_entries) ? body.ledger_entries : []
     const id = transactionBody.id || transactionBody.$id || genId()
     const createdAt = transactionBody.createdAt || transactionBody.$createdAt || getNow()
     const updatedAt = transactionBody.updatedAt || transactionBody.$updatedAt || createdAt
 
     const safeTransaction = sanitizeInput('transactions', transactionBody)
+    const ledgerEntries = rawLedgerEntries
+        .map(rawEntry => ({
+            ...sanitizeInput('ledger_entries', rawEntry),
+            reference_type: rawEntry.reference_type || 'transaction',
+            reference_id: rawEntry.reference_id || id,
+        }))
+        .filter(entry => entry.agent_id && Number(entry.amount || 0) > 0)
+
+    for (const entry of ledgerEntries) {
+        const { results } = await c.env.DB.prepare('SELECT id FROM agents WHERE id = ?').bind(entry.agent_id).all()
+        if (!results.length) {
+            return c.json({ error: `Agent ${entry.agent_id} not found` }, 400)
+        }
+    }
+
     const txKeys = ['id', 'createdAt', 'updatedAt', ...Object.keys(safeTransaction)]
     const txValues = [id, createdAt, updatedAt, ...Object.values(safeTransaction)]
 
@@ -339,12 +354,8 @@ app.post('/transactions/with-ledger', async (c) => {
     const createdLedgerEntries = []
     const updatedAgents = []
     const seenAgents = new Set()
-    for (const rawEntry of ledgerEntries) {
-        const result = await recordLedgerEntryFast(c, {
-            ...sanitizeInput('ledger_entries', rawEntry),
-            reference_type: rawEntry.reference_type || 'transaction',
-            reference_id: rawEntry.reference_id || id,
-        })
+    for (const entry of ledgerEntries) {
+        const result = await recordLedgerEntryFast(c, entry)
         if (!result) continue
         createdLedgerEntries.push(result.entry)
         if (!seenAgents.has(result.agent.$id)) {
