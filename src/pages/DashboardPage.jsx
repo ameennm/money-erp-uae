@@ -12,6 +12,24 @@ import { applyDateRange, round2 } from '../utils/filterHelpers';
 
 const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
 const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+const hasAmountCombination = (amounts = [], target, tolerance = 0.05) => {
+    const targetCents = Math.round((Number(target) || 0) * 100);
+    const toleranceCents = Math.ceil(tolerance * 100);
+    const sums = new Set([0]);
+
+    for (const amount of amounts) {
+        const amountCents = Math.round((Number(amount) || 0) * 100);
+        if (amountCents <= 0) continue;
+
+        for (const sum of [...sums]) {
+            const next = sum + amountCents;
+            if (Math.abs(next - targetCents) <= toleranceCents) return true;
+            if (next < targetCents + toleranceCents) sums.add(next);
+        }
+    }
+
+    return false;
+};
 
 const getConversionMeta = (conversion = {}) => {
     const sourceCurrency = conversion.source_currency || (Number(conversion.sar_amount || 0) > 0 ? 'SAR' : 'AED');
@@ -39,13 +57,17 @@ const isLinkedConversionReceipt = (expense, conversions = []) => {
 
 const hasMatchingConversionFund = (conversion, expenses = []) => {
     const meta = getConversionMeta(conversion);
-    return expenses.some(exp => {
+    const matchingFunds = expenses.filter(exp => {
         if (exp.category !== 'Conversion Fund Ops') return false;
+        if (exp.type === 'income') return false;
         if (exp.distributor_id !== conversion.conversion_agent_id) return false;
         if (conversion.date && exp.date && conversion.date !== exp.date) return false;
         if (exp.currency !== meta.sourceCurrency) return false;
-        return closeEnough(exp.amount, meta.sourceAmount);
+        return Number(exp.amount || 0) > 0;
     });
+
+    return matchingFunds.some(exp => closeEnough(exp.amount, meta.sourceAmount))
+        || hasAmountCombination(matchingFunds.map(exp => exp.amount), meta.sourceAmount);
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
