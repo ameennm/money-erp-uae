@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authService, dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
@@ -12,6 +13,7 @@ import { canOperate } from '../utils/roles';
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection', sar_balance: 0, aed_balance: 0 };
 
 export default function AgentsPage() {
+    const navigate = useNavigate();
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
@@ -135,6 +137,49 @@ export default function AgentsPage() {
             fetch();
         } catch (err) {
             toast.error('Failed: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const baseReferenceId = (referenceId = '') => String(referenceId).replace(/_(src|tgt|coll|dist|conv)$/, '');
+
+    const handleEditLedgerEntry = (entry) => {
+        if (entry.reference_type !== 'transaction') {
+            toast.error('Only transaction rows can be edited here');
+            return;
+        }
+        navigate(`/transactions?edit=${baseReferenceId(entry.reference_id)}`);
+    };
+
+    const handleDeleteLedgerEntry = async (entry) => {
+        if (!entry?.reference_type || !entry?.reference_id) {
+            toast.error('This ledger row has no source record to delete');
+            return false;
+        }
+
+        const refId = baseReferenceId(entry.reference_id);
+        const isTransaction = entry.reference_type === 'transaction';
+        const message = isTransaction
+            ? 'Delete the full transaction linked to this agent row? This will rollback all connected agent, distributor, and conversion balances.'
+            : 'Delete this agent ledger operation? This will rollback the linked balance row.';
+
+        if (!window.confirm(message)) return false;
+
+        setSaving(true);
+        try {
+            await ledgerService.deleteRelatedEntries(refId, entry.reference_type);
+            if (isTransaction) {
+                await dbService.deleteTransaction(refId);
+            } else if (entry.reference_type === 'expense') {
+                await dbService.deleteExpense(refId);
+            }
+            toast.success(isTransaction ? 'Transaction deleted' : 'Ledger operation deleted');
+            await fetch();
+            return true;
+        } catch (e) {
+            toast.error('Delete failed: ' + e.message);
+            return false;
         } finally {
             setSaving(false);
         }
@@ -312,7 +357,12 @@ export default function AgentsPage() {
             )}
 
             {/* History Modal */}
-            <LedgerModal agent={viewingAgent} onClose={() => setViewingAgent(null)} />
+            <LedgerModal
+                agent={viewingAgent}
+                onClose={() => setViewingAgent(null)}
+                onDeleteEntry={handleDeleteLedgerEntry}
+                onEditEntry={handleEditLedgerEntry}
+            />
 
             {/* Add/Edit Modal */}
             {modal && (

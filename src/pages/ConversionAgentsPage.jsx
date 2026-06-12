@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authService, dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
@@ -16,7 +17,26 @@ const CONV_TYPES = [
     { value: 'conversion_aed', label: 'AED → INR', color: 'var(--brand-gold)', bg: 'rgba(245, 166, 35, 0.05)' }
 ];
 
+const fmtMoney = (value, maxDigits = 2) => (Number(value) || 0).toLocaleString('en-IN', {
+    maximumFractionDigits: maxDigits,
+});
+
+const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+
+const getConversionMeta = (record = {}) => {
+    const sourceCurrency = record.source_currency || (Number(record.sar_amount || 0) > 0 ? 'SAR' : 'AED');
+    const targetCurrency = record.target_currency || (sourceCurrency === 'SAR' ? 'AED' : 'INR');
+    const sourceAmount = sourceCurrency === 'SAR' ? Number(record.sar_amount || 0) : Number(record.aed_amount || 0);
+    const targetAmount = targetCurrency === 'AED'
+        ? Number(record.aed_amount || 0)
+        : Number(record.profit_inr || 0);
+    const rate = sourceCurrency === 'SAR' ? Number(record.sar_rate || 0) : Number(record.aed_rate || 0);
+
+    return { sourceCurrency, targetCurrency, sourceAmount, targetAmount, rate };
+};
+
 export default function ConversionAgentsPage() {
+    const navigate = useNavigate();
     const [agents, setAgents] = useState([]);
     const [convRecs, setConvRecs] = useState([]);   
     const [loading, setLoading] = useState(true);
@@ -95,16 +115,136 @@ export default function ConversionAgentsPage() {
         finally { setSaving(false); }
     };
 
-    const handleDelete = async (agent) => {
-        const agentRecs = convRecs.filter(r => r.conversion_agent_id === agent.$id);
-        const msg = agentRecs.length > 0
-            ? `Delete "${agent.name}"? This will also delete ${agentRecs.length} conversion record(s).`
-            : `Delete conversion agent "${agent.name}"?`;
-        if (!window.confirm(msg)) return;
+    const findLinkedReceiptExpenses = (record, expenses = []) => {
+        const meta = getConversionMeta(record);
+        const matches = expenses.filter(exp => {
+            if (exp.category !== 'Conversion Receipt') return false;
+            if (record.receipt_expense_id && exp.$id === record.receipt_expense_id) return true;
+            if (exp.distributor_id !== record.conversion_agent_id) return false;
+            if (record.date && exp.date && exp.date !== record.date) return false;
+            if (exp.currency !== meta.targetCurrency) return false;
+            if (!closeEnough(exp.amount, meta.targetAmount)) return false;
+            const notes = exp.notes || '';
+            return notes.includes('Sourced from') && notes.includes(meta.sourceCurrency);
+        });
+
+        return matches.length > 0 ? [matches[0]] : [];
+    };
+
+    const deleteConversionRecord = async (record, { confirmDelete = true, refresh = true, showToast = true } = {}) => {
+        const meta = getConversionMeta(record);
+        if (confirmDelete) {
+            const ok = window.confirm(
+                `Delete this conversion settlement?\n\n${fmtMoney(meta.sourceAmount)} ${meta.sourceCurrency} → ${fmtMoney(meta.targetAmount)} ${meta.targetCurrency}\n\nLinked ledger and receipt rows will be rolled back.`
+            );
+            if (!ok) return false;
+        }
+
+        const expenses = await dbService.listExpenses();
+        const linkedReceipts = findLinkedReceiptExpenses(record, expenses.documents);
+
+        await ledgerService.deleteRelatedEntries(record.$id, 'aed_conversion');
+
+        for (const receipt of linkedReceipts) {
+            await ledgerService.deleteRelatedEntries(receipt.$id, 'expense');
+            await dbService.deleteExpense(receipt.$id);
+        }
+
+        await dbService.deleteAedConversion(record.$id);
+        if (showToast) toast.success('Conversion settlement deleted');
+        if (refresh) await fetchAll();
+        return true;
+    };
+
+    const handleDeleteConversionRecord = async (record) => {
+        setSaving(true);
         try {
-            await Promise.all(agentRecs.map(r => dbService.deleteAedConversion(r.$id)));
+            await deleteConversionRecord(record);
+        } catch (e) {
+            toast.error('Delete failed: ' + e.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteLedgerEntry = async (entry) => {
+        if (!entry?.reference_type || !entry?.reference_id) {
+            toast.error('This ledger row has no source record to delete');
+            return false;
+        }
+
+        const baseRef = String(entry.reference_id).replace(/_(src|tgt|coll|dist|conv)$/, '');
+        const isTransaction = entry.reference_type === 'transaction';
+        const confirmText = isTransaction
+            ? 'Delete the full transaction linked to this ledger row? This affects the transaction and all connected ledger balances.'
+            : 'Delete this ledger transaction? Linked conversion history and receipt rows will be rolled back where applicable.';
+
+        if (!window.confirm(confirmText)) return false;
+
+        setSaving(true);
+        try {
+            if (entry.reference_type === 'aed_conversion') {
+                const record = convRecs.find(r => r.$id === baseRef) || await dbService.getAedConversion(baseRef);
+                await deleteConversionRecord(record, { confirmDelete: false, refresh: false, showToast: false });
+            } else if (entry.reference_type === 'expense') {
+                const [expenses, conversions] = await Promise.all([
+                    dbService.listExpenses(),
+                    dbService.listAedConversions(),
+                ]);
+                const expense = expenses.documents.find(exp => exp.$id === baseRef);
+                const linkedConversion = conversions.documents.find(record => {
+                    if (record.receipt_expense_id === baseRef) return true;
+                    return expense && findLinkedReceiptExpenses(record, [expense]).length > 0;
+                });
+
+                if (linkedConversion) {
+                    await deleteConversionRecord(linkedConversion, { confirmDelete: false, refresh: false, showToast: false });
+                } else {
+                    await ledgerService.deleteRelatedEntries(baseRef, 'expense');
+                    await dbService.deleteExpense(baseRef);
+                }
+            } else if (isTransaction) {
+                await ledgerService.deleteRelatedEntries(baseRef, 'transaction');
+                await dbService.deleteTransaction(baseRef);
+            } else {
+                await ledgerService.deleteRelatedEntries(baseRef, entry.reference_type);
+            }
+
+            toast.success('Ledger transaction deleted');
+            await fetchAll();
+            return true;
+        } catch (e) {
+            toast.error('Delete failed: ' + e.message);
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleEditLedgerEntry = (entry) => {
+        if (entry.reference_type !== 'transaction') {
+            toast.error('Only transaction rows can be edited here');
+            return;
+        }
+        const baseRef = String(entry.reference_id).replace(/_(src|tgt|coll|dist|conv)$/, '');
+        navigate(`/transactions?edit=${baseRef}`);
+    };
+
+    const handleDelete = async (agent) => {
+        try {
+            const [agentRecs, ledgerRows] = await Promise.all([
+                Promise.resolve(convRecs.filter(r => r.conversion_agent_id === agent.$id)),
+                dbService.listLedgerEntries([Query.equal('agent_id', agent.$id)]),
+            ]);
+
+            if (agentRecs.length > 0 || ledgerRows.total > 0) {
+                toast.error('Delete this agent’s ledger transactions first, then delete the empty agent.');
+                return;
+            }
+
+            if (!window.confirm(`Delete conversion agent "${agent.name}"?`)) return;
             await dbService.deleteAgent(agent.$id);
-            toast.success(`Deleted agent`);
+            toast.success('Deleted agent');
             fetchAll();
         } catch (e) { toast.error(e.message); }
     };
@@ -194,6 +334,7 @@ export default function ConversionAgentsPage() {
                 aed_rate: activeAgent.type === 'conversion_aed' ? rate : null,
                 source_currency: balCur,
                 target_currency: incomeCur,
+                receipt_expense_id: createdExpense.$id,
             });
 
             await ledgerService.recordEntry({
@@ -219,6 +360,31 @@ export default function ConversionAgentsPage() {
     // ── Business Perspective Summary ──
     const currentAgents = agents.filter(a => a.type === activeTab);
     const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
+    const currentAgentIds = useMemo(() => new Set(currentAgents.map(a => a.$id)), [currentAgents]);
+    const visibleConversionRecords = useMemo(() => {
+        const search = searchTerm.toLowerCase();
+        return convRecs
+            .filter(r => currentAgentIds.has(r.conversion_agent_id))
+            .filter(r => !search || r.conversion_agent_name?.toLowerCase().includes(search))
+            .sort((a, b) => new Date(b.date || b.$createdAt || 0) - new Date(a.date || a.$createdAt || 0));
+    }, [convRecs, currentAgentIds, searchTerm]);
+
+    const settlementPreview = useMemo(() => {
+        if (!activeAgent) return null;
+        const sourceAmount = Number(actionAmount);
+        const rate = Number(actionRate);
+        const sourceCurrency = activeAgent.type === 'conversion_sar' ? 'SAR' : 'AED';
+        const targetCurrency = activeAgent.type === 'conversion_sar' ? 'AED' : 'INR';
+        if (!sourceAmount || !rate) {
+            return { sourceCurrency, targetCurrency, sourceAmount: 0, targetAmount: 0, rate };
+        }
+
+        const targetAmount = activeAgent.type === 'conversion_sar'
+            ? sourceAmount / rate
+            : sourceAmount * rate;
+
+        return { sourceCurrency, targetCurrency, sourceAmount, targetAmount, rate };
+    }, [activeAgent, actionAmount, actionRate]);
     
     const debits = currentAgents.reduce((s, a) => {
         const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
@@ -383,12 +549,82 @@ export default function ConversionAgentsPage() {
                             </table>
                         </div>
                     </div>
+
+                    <div className="card mt-6">
+                        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                            <div>
+                                <h3 className="card-title" style={{ margin: 0 }}>Conversion Settlements</h3>
+                                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                                    {visibleConversionRecords.length} settlement{visibleConversionRecords.length !== 1 ? 's' : ''} for {activeTab === 'conversion_sar' ? 'SAR → AED' : 'AED → INR'}
+                                </div>
+                            </div>
+                        </div>
+                        {visibleConversionRecords.length === 0 ? (
+                            <div className="empty-state" style={{ padding: '32px 16px' }}>
+                                <List size={32} />
+                                <p>No conversion settlements found for this view.</p>
+                            </div>
+                        ) : (
+                            <div className="table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th style={{ width: 44 }}>#</th>
+                                            <th style={{ width: 120 }}>Date</th>
+                                            <th>Agent</th>
+                                            <th style={{ textAlign: 'right' }}>Source</th>
+                                            <th style={{ textAlign: 'right', width: 120 }}>Rate</th>
+                                            <th style={{ textAlign: 'right' }}>Converted</th>
+                                            <th style={{ textAlign: 'right', width: 90 }}>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {visibleConversionRecords.map((record, i) => {
+                                            const meta = getConversionMeta(record);
+                                            return (
+                                                <tr key={record.$id}>
+                                                    <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                                                    <td style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{record.date || '—'}</td>
+                                                    <td style={{ fontWeight: 700 }}>{record.conversion_agent_name || '—'}</td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 800 }}>
+                                                        {fmtMoney(meta.sourceAmount)} <span style={{ fontSize: 10, opacity: 0.65 }}>{meta.sourceCurrency}</span>
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                                        {meta.rate ? fmtMoney(meta.rate, 6) : '—'}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-primary)' }}>
+                                                        {fmtMoney(meta.targetAmount)} <span style={{ fontSize: 10, opacity: 0.65 }}>{meta.targetCurrency}</span>
+                                                    </td>
+                                                    <td style={{ textAlign: 'right' }}>
+                                                        <button
+                                                            type="button"
+                                                            className="btn btn-danger btn-sm btn-icon"
+                                                            title="Delete conversion settlement"
+                                                            disabled={saving}
+                                                            onClick={() => handleDeleteConversionRecord(record)}
+                                                        >
+                                                            <Trash2 size={13} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
                 </>
             )}
 
             {/* History Modal */}
             {viewingAgent && (
-                <LedgerModal agent={viewingAgent} onClose={() => setViewingAgent(null)} />
+                <LedgerModal
+                    agent={viewingAgent}
+                    onClose={() => setViewingAgent(null)}
+                    onDeleteEntry={handleDeleteLedgerEntry}
+                    onEditEntry={handleEditLedgerEntry}
+                />
             )}
 
             {/* Modal */}
@@ -540,6 +776,30 @@ export default function ConversionAgentsPage() {
                                 <label className="form-label">Exchange Rate</label>
                                 <input className="form-input" type="number" step="any" required
                                     value={actionRate} onChange={e => setActionRate(e.target.value)} />
+                            </div>
+                            <div
+                                className="card"
+                                style={{
+                                    padding: '14px 16px',
+                                    background: 'rgba(0, 214, 143, 0.08)',
+                                    border: '1px solid rgba(0, 214, 143, 0.22)',
+                                }}
+                            >
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6 }}>
+                                    Converted Amount
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                                    <span style={{ fontSize: 24, fontWeight: 900, color: 'var(--brand-primary)', overflowWrap: 'anywhere' }}>
+                                        {fmtMoney(settlementPreview?.targetAmount || 0)}
+                                    </span>
+                                    <span style={{ fontSize: 12, fontWeight: 900, color: 'var(--brand-primary)' }}>
+                                        {settlementPreview?.targetCurrency}
+                                    </span>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6 }}>
+                                    {fmtMoney(settlementPreview?.sourceAmount || 0)} {settlementPreview?.sourceCurrency}
+                                    {settlementPreview?.rate ? ` @ ${fmtMoney(settlementPreview.rate, 6)}` : ''}
+                                </div>
                             </div>
                             <div className="modal-footer border-none px-0 pb-0">
                                 <button type="button" className="btn btn-outline" onClick={() => setReceiveModal(false)}>Cancel</button>

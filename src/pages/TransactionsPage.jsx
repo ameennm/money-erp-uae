@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
@@ -55,6 +56,7 @@ const EMPTY = {
 };
 
 export default function TransactionsPage() {
+    const [searchParams, setSearchParams] = useSearchParams();
     const { role, user } = useAuth();
     const isAdmin = isBusinessAdmin(role);
     const isCollector = role === 'collector' || isAdmin;
@@ -335,6 +337,27 @@ export default function TransactionsPage() {
         setForm({ ...tx });
         setModal(true);
     };
+
+    useEffect(() => {
+        const editId = searchParams.get('edit');
+        if (!editId || txs.length === 0) return;
+
+        const target = txs.find(tx => tx.$id === editId);
+        if (!target) {
+            toast.error('Transaction not found for editing');
+            const next = new URLSearchParams(searchParams);
+            next.delete('edit');
+            setSearchParams(next, { replace: true });
+            return;
+        }
+
+        setEditTx(target);
+        setForm({ ...target });
+        setModal(true);
+        const next = new URLSearchParams(searchParams);
+        next.delete('edit');
+        setSearchParams(next, { replace: true });
+    }, [txs, searchParams, setSearchParams]);
 
     const handleDelete = async (tx) => {
         if (!isAdmin) return toast.error('Only admins can delete transactions');

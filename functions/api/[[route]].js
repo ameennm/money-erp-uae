@@ -79,6 +79,7 @@ const ensureOptionalSchema = async (db) => {
     await ensureColumn(db, 'aed_conversions', 'aed_rate', 'REAL')
     await ensureColumn(db, 'aed_conversions', 'source_currency', 'TEXT')
     await ensureColumn(db, 'aed_conversions', 'target_currency', 'TEXT')
+    await ensureColumn(db, 'aed_conversions', 'receipt_expense_id', 'TEXT')
     await ensureColumn(db, 'employees', 'password_hash', 'TEXT')
     await ensureColumn(db, 'employees', 'password_salt', 'TEXT')
 
@@ -168,7 +169,7 @@ const VALID_COLUMNS = {
     employees: ['name', 'email', 'role', 'notes', 'password_hash', 'password_salt'],
     expenses: ['title', 'category', 'amount', 'currency', 'date', 'notes', 'type', 'distributor_id', 'distributor_name'],
     credits: ['from_person', 'reason', 'amount_sar', 'date', 'admin_approved'],
-    aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date', 'sar_rate', 'aed_rate', 'source_currency', 'target_currency'],
+    aed_conversions: ['sar_amount', 'aed_amount', 'profit_inr', 'conversion_agent_id', 'conversion_agent_name', 'date', 'sar_rate', 'aed_rate', 'source_currency', 'target_currency', 'receipt_expense_id'],
     ledger_entries: ['agent_id', 'agent_name', 'agent_type', 'amount', 'currency', 'type', 'reference_type', 'reference_id', 'description', 'running_balance'],
     activity_logs: ['actor_id', 'actor_name', 'actor_email', 'actor_role', 'action', 'entity_type', 'entity_id', 'entity_label', 'details'],
 };

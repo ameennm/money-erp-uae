@@ -128,6 +128,7 @@ export const dbService = {
         return applyQueries(data, q);
     },
     async createExpense(data) { return fetchApi('/expenses', { method: 'POST', body: JSON.stringify(data) }); },
+    async getExpense(id) { return fetchApi(`/expenses/${id}`); },
     async updateExpense(id, data) { return fetchApi(`/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
     async deleteExpense(id) { return fetchApi(`/expenses/${id}`, { method: 'DELETE' }); },
 
@@ -146,6 +147,7 @@ export const dbService = {
         return applyQueries(data, q);
     },
     async createAedConversion(data) { return fetchApi('/aed_conversions', { method: 'POST', body: JSON.stringify(data) }); },
+    async getAedConversion(id) { return fetchApi(`/aed_conversions/${id}`); },
     async updateAedConversion(id, data) { return fetchApi(`/aed_conversions/${id}`, { method: 'PUT', body: JSON.stringify(data) }); },
     async deleteAedConversion(id) { return fetchApi(`/aed_conversions/${id}`, { method: 'DELETE' }); },
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { dbService, Query } from '../lib/appwrite';
-import { X, Download, FileSpreadsheet, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
+import { X, Download, FileSpreadsheet, TrendingUp, TrendingDown, Wallet, Trash2, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -20,13 +20,14 @@ const formatTransactionRates = (tx) => {
     ].filter(Boolean).join(' | ');
 };
 
-export default function LedgerModal({ agent, onClose }) {
+export default function LedgerModal({ agent, onClose, onDeleteEntry, onEditEntry }) {
     const [entries, setEntries] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [currencyFilter, setCurrencyFilter] = useState('All');
     const [search, setSearch] = useState('');
     const [dateRange, setDateRange] = useState({ range: 'All Time', customFrom: '', customTo: '' });
+    const [deletingId, setDeletingId] = useState(null);
     
     const fetchEntries = useCallback(async () => {
         if (!agent) return;
@@ -147,6 +148,17 @@ export default function LedgerModal({ agent, onClose }) {
         toast.success(`Downloaded ledger`);
     };
 
+    const handleDeleteRow = async (row) => {
+        if (!onDeleteEntry || deletingId) return;
+        setDeletingId(row._id);
+        try {
+            const didDelete = await onDeleteEntry(row);
+            if (didDelete !== false) await fetchEntries();
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
     if (!agent) return null;
 
     return (
@@ -235,6 +247,7 @@ export default function LedgerModal({ agent, onClose }) {
                                                     <th className="w-32 text-right text-[#4a9eff]">Debit (+)</th>
                                                     <th className="w-32 text-right text-[#ef4444]">Credit (−)</th>
                                                     <th className="w-36 text-right">Balance</th>
+                                                    {(onDeleteEntry || onEditEntry) && <th className="w-24 text-right">Action</th>}
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -263,6 +276,33 @@ export default function LedgerModal({ agent, onClose }) {
                                                             <td className={`text-right font-black ${balCol}`}>
                                                                 {r.runningBalance >= 0 ? '+' : ''}{fmt(r.runningBalance)} <span className="text-[9px] opacity-40">{r.currency}</span>
                                                             </td>
+                                                            {(onDeleteEntry || onEditEntry) && (
+                                                                <td className="text-right">
+                                                                    <div className="flex gap-2 justify-end">
+                                                                        {onEditEntry && r.reference_type === 'transaction' && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="btn btn-outline btn-sm btn-icon"
+                                                                                title="Edit transaction"
+                                                                                onClick={() => onEditEntry(r)}
+                                                                            >
+                                                                                <Pencil size={13} />
+                                                                            </button>
+                                                                        )}
+                                                                        {onDeleteEntry && (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="btn btn-danger btn-sm btn-icon"
+                                                                                title="Delete ledger transaction"
+                                                                                disabled={deletingId === r._id}
+                                                                                onClick={() => handleDeleteRow(r)}
+                                                                            >
+                                                                                <Trash2 size={13} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            )}
                                                         </tr>
                                                     );
                                                 })}

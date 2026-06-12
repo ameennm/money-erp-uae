@@ -55,6 +55,33 @@ export default function ReconciliationPage() {
         setLogs(prev => [{ msg, type, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 100));
     };
 
+    const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+
+    const getBulkConversionMeta = (bulk = {}) => {
+        const sourceCurrency = bulk.source_currency || (Number(bulk.sar_amount || 0) > 0 ? 'SAR' : 'AED');
+        const targetCurrency = bulk.target_currency || (sourceCurrency === 'SAR' ? 'AED' : 'INR');
+        const sourceAmount = sourceCurrency === 'SAR' ? Number(bulk.sar_amount || 0) : Number(bulk.aed_amount || 0);
+        const targetAmount = targetCurrency === 'AED'
+            ? Number(bulk.aed_amount || 0)
+            : Number(bulk.profit_inr || 0);
+
+        return { sourceCurrency, targetCurrency, sourceAmount, targetAmount };
+    };
+
+    const hasReceiptExpenseForBulk = (bulk, expenses = []) => {
+        const meta = getBulkConversionMeta(bulk);
+        return expenses.some(exp => {
+            if (exp.category !== 'Conversion Receipt') return false;
+            if (bulk.receipt_expense_id && exp.$id === bulk.receipt_expense_id) return true;
+            if (exp.distributor_id !== bulk.conversion_agent_id) return false;
+            if (bulk.date && exp.date && exp.date !== bulk.date) return false;
+            if (exp.currency !== meta.targetCurrency) return false;
+            if (!closeEnough(exp.amount, meta.targetAmount)) return false;
+            const notes = exp.notes || '';
+            return notes.includes('Sourced from') && notes.includes(meta.sourceCurrency);
+        });
+    };
+
     const handleClearLedger = async () => {
         if (!window.confirm('WARNING: This will delete ALL existing ledger entries. Are you sure?')) return;
 
@@ -232,6 +259,7 @@ export default function ReconciliationPage() {
             // Process Bulk Conversions
             for (const bulk of bulks.documents) {
                 if (!bulk.conversion_agent_id) continue;
+                if (hasReceiptExpenseForBulk(bulk, exps.documents)) continue;
                 const convAgent = agts.documents.find(a => a.$id === bulk.conversion_agent_id);
                 if (!existingRefs.has(bulk.$id + '_src')) {
                     const srcAmt = Number(bulk.sar_amount || bulk.aed_amount);
@@ -447,6 +475,7 @@ export default function ReconciliationPage() {
             // 4. Process Bulk Conversions (Double entry for source and target)
             for (const bulk of bulks.documents) {
                 if (!bulk.conversion_agent_id) continue;
+                if (hasReceiptExpenseForBulk(bulk, exps.documents)) continue;
 
                 const convAgent = agts.documents.find(a => a.$id === bulk.conversion_agent_id);
 

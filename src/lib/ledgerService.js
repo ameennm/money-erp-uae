@@ -1,6 +1,11 @@
 import { dbService } from './appwrite';
 
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
+const matchesReference = (entryRef, referenceId) => {
+    const entry = String(entryRef || '');
+    const ref = String(referenceId || '');
+    return entry === ref || entry.startsWith(`${ref}_`);
+};
 
 export const ledgerService = {
     /**
@@ -32,6 +37,17 @@ export const ledgerService = {
         // Debit increases balance (agent owes more), Credit decreases it (agent paid/distributed)
         const sign = type === 'debit' ? 1 : -1;
         const absAmount = Math.abs(Number(amount));
+        const existingEntries = await dbService.listLedgerEntries();
+        const existingEntry = existingEntries.documents.find(e =>
+            e.reference_id === reference_id &&
+            e.reference_type === reference_type &&
+            e.agent_id === targetId &&
+            e.currency === currency &&
+            e.type === type &&
+            Math.abs((Number(e.amount) || 0) - absAmount) < 0.001
+        );
+        if (existingEntry) return existingEntry;
+
         const newBal = round2(currentBal + (absAmount * sign));
 
         // 2. Create the ledger entry
@@ -62,7 +78,9 @@ export const ledgerService = {
 
         // 1. Find the entries to delete
         const entriesRes = await dbService.listLedgerEntries();
-        const relatedEntries = entriesRes.documents.filter(e => e.reference_id === reference_id && e.reference_type === reference_type);
+        const relatedEntries = entriesRes.documents.filter(e =>
+            matchesReference(e.reference_id, reference_id) && e.reference_type === reference_type
+        );
 
         for (const entry of relatedEntries) {
             try {

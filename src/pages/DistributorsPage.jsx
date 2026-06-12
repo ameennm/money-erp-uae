@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
@@ -12,6 +13,7 @@ import { round2 } from '../utils/filterHelpers';
 const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: 'INR' };
 
 export default function DistributorsPage() {
+    const navigate = useNavigate();
     const [distributors, setDistributors] = useState([]);
     const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -222,6 +224,49 @@ export default function DistributorsPage() {
         }
     };
 
+    const baseReferenceId = (referenceId = '') => String(referenceId).replace(/_(src|tgt|coll|dist|conv)$/, '');
+
+    const handleEditLedgerEntry = (entry) => {
+        if (entry.reference_type !== 'transaction') {
+            toast.error('Only transaction rows can be edited here');
+            return;
+        }
+        navigate(`/transactions?edit=${baseReferenceId(entry.reference_id)}`);
+    };
+
+    const handleDeleteLedgerEntry = async (entry) => {
+        if (!entry?.reference_type || !entry?.reference_id) {
+            toast.error('This ledger row has no source record to delete');
+            return false;
+        }
+
+        const refId = baseReferenceId(entry.reference_id);
+        const isTransaction = entry.reference_type === 'transaction';
+        const message = isTransaction
+            ? 'Delete the full transaction linked to this distributor row? This will rollback all connected agent, distributor, and conversion balances.'
+            : 'Delete this distributor ledger operation? This will rollback the linked balance row.';
+
+        if (!window.confirm(message)) return false;
+
+        setSaving(true);
+        try {
+            await ledgerService.deleteRelatedEntries(refId, entry.reference_type);
+            if (isTransaction) {
+                await dbService.deleteTransaction(refId);
+            } else if (entry.reference_type === 'expense') {
+                await dbService.deleteExpense(refId);
+            }
+            toast.success(isTransaction ? 'Transaction deleted' : 'Ledger operation deleted');
+            await fetchAll();
+            return true;
+        } catch (e) {
+            toast.error('Delete failed: ' + e.message);
+            return false;
+        } finally {
+            setSaving(false);
+        }
+    };
+
 
     return (
         <Layout title="Distributors">
@@ -364,6 +409,8 @@ export default function DistributorsPage() {
             <LedgerModal 
                 agent={viewingDist} 
                 onClose={() => setViewingDist(null)} 
+                onDeleteEntry={handleDeleteLedgerEntry}
+                onEditEntry={handleEditLedgerEntry}
             />
 
             {/* Modal */}
