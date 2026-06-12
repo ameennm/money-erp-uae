@@ -74,6 +74,7 @@ export default function TransactionsPage() {
     const [form, setForm] = useState(EMPTY);
     const [saving, setSaving] = useState(false);
     const isSavingRef = useRef(false);
+    const pendingLedgerEntriesRef = useRef(new Map());
 
     const fetchAll = async () => {
         setLoading(true);
@@ -92,17 +93,30 @@ export default function TransactionsPage() {
 
     useEffect(() => { fetchAll(); }, []);
 
+    const balanceFieldFor = (currency) => currency === 'INR' ? 'inr_balance' : (currency === 'SAR' ? 'sar_balance' : 'aed_balance');
+
+    const applyLedgerEntriesToAgent = (agent, ledgerEntries = [], direction = 1) => {
+        const relevantEntries = ledgerEntries.filter(entry => entry.agent_id === agent.$id);
+        if (!relevantEntries.length) return agent;
+
+        const next = { ...agent };
+        relevantEntries.forEach(entry => {
+            const field = balanceFieldFor(entry.currency);
+            const sign = entry.type === 'debit' ? 1 : -1;
+            next[field] = round2((next[field] || 0) + (Number(entry.amount || 0) * sign * direction));
+        });
+        return next;
+    };
+
     const mergeUpdatedAgents = (updatedAgents = []) => {
         if (!updatedAgents.length) return;
         const updatedById = new Map(updatedAgents.map(agent => [agent.$id, agent]));
-        setAgents(prev => prev.map(agent => updatedById.get(agent.$id) || agent));
-    };
-
-    const addSavedTransaction = (result) => {
-        if (result?.transaction) {
-            setTxs(prev => [result.transaction, ...prev.filter(tx => tx.$id !== result.transaction.$id)]);
-        }
-        mergeUpdatedAgents(result?.updated_agents || []);
+        const pendingLedgerEntries = Array.from(pendingLedgerEntriesRef.current.values()).flat();
+        setAgents(prev => prev.map(agent => {
+            const updatedAgent = updatedById.get(agent.$id);
+            if (!updatedAgent) return agent;
+            return applyLedgerEntriesToAgent(updatedAgent, pendingLedgerEntries);
+        }));
     };
 
     const makeLedgerEntry = ({ agent, amount, currency, type, description }) => ({
@@ -115,6 +129,54 @@ export default function TransactionsPage() {
         reference_type: 'transaction',
         description,
     });
+
+    const applyAgentBalanceDeltas = (ledgerEntries = [], direction = 1) => {
+        if (!ledgerEntries.length) return;
+        setAgents(prev => prev.map(agent => applyLedgerEntriesToAgent(agent, ledgerEntries, direction)));
+    };
+
+    const addOptimisticTransaction = ({ payload, ledgerEntries, successMessage }) => {
+        const tempId = `local-${crypto.randomUUID()}`;
+        const now = new Date().toISOString();
+        const optimisticTx = {
+            ...payload,
+            id: tempId,
+            $id: tempId,
+            createdAt: now,
+            updatedAt: now,
+            $createdAt: now,
+            $updatedAt: now,
+            _optimistic: true,
+        };
+
+        setTxs(prev => [optimisticTx, ...prev]);
+        pendingLedgerEntriesRef.current.set(tempId, ledgerEntries);
+        applyAgentBalanceDeltas(ledgerEntries, 1);
+        setModal(false);
+        setForm(EMPTY);
+        setEditTx(null);
+        toast.success(successMessage);
+        isSavingRef.current = false;
+        setSaving(false);
+
+        dbService.createTransactionWithLedger({
+            transaction: payload,
+            ledger_entries: ledgerEntries,
+        }).then(result => {
+            if (result?.transaction) {
+                setTxs(prev => [result.transaction, ...prev.filter(tx => tx.$id !== tempId && tx.$id !== result.transaction.$id)]);
+            } else {
+                setTxs(prev => prev.filter(tx => tx.$id !== tempId));
+            }
+            pendingLedgerEntriesRef.current.delete(tempId);
+            mergeUpdatedAgents(result?.updated_agents || []);
+        }).catch(err => {
+            pendingLedgerEntriesRef.current.delete(tempId);
+            setTxs(prev => prev.filter(tx => tx.$id !== tempId));
+            applyAgentBalanceDeltas(ledgerEntries, -1);
+            toast.error('Save failed: ' + err.message);
+        });
+    };
 
     // ── Calculations ──────────────────────────────────────────────────────────
 
@@ -260,12 +322,12 @@ export default function TransactionsPage() {
                             description: `MIGRATION: Initial balance for ${target.name}`
                         }));
                     }
-                    const result = await dbService.createTransactionWithLedger({
-                        transaction: payload,
-                        ledger_entries: ledgerEntries,
+                    addOptimisticTransaction({
+                        payload,
+                        ledgerEntries,
+                        successMessage: 'Migration added, syncing',
                     });
-                    addSavedTransaction(result);
-                    toast.success('Migration record created');
+                    return;
                 } else {
                     // ── STANDARD TRANSACTION LOGIC ──
                     if (!payload.distributor_id) {
@@ -333,12 +395,12 @@ export default function TransactionsPage() {
                             }));
                         }
                     }
-                    const result = await dbService.createTransactionWithLedger({
-                        transaction: payload,
-                        ledger_entries: ledgerEntries,
+                    addOptimisticTransaction({
+                        payload,
+                        ledgerEntries,
+                        successMessage: 'Transaction added, syncing',
                     });
-                    addSavedTransaction(result);
-                    toast.success('Transaction Logged');
+                    return;
                 }
             }
             setModal(false);
