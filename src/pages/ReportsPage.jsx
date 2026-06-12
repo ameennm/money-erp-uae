@@ -79,6 +79,23 @@ const hasMatchingConversionFund = (conversion, expenses = []) => {
         || hasAmountCombination(matchingFunds.map(exp => exp.amount), meta.sourceAmount);
 };
 
+const getLedgerTargetAmount = (conversion, expenses = []) => {
+    const meta = getConversionMeta(conversion);
+    if (meta.targetCurrency !== 'AED') return meta.targetAmount;
+
+    const matchingDebit = expenses
+        .filter(exp => {
+            if (exp.category !== 'Conversion Fund Ops') return false;
+            if (exp.type === 'income') return false;
+            if (exp.currency !== meta.targetCurrency) return false;
+            if (conversion.date && exp.date && conversion.date !== exp.date) return false;
+            return closeEnough(exp.amount, meta.targetAmount, 5);
+        })
+        .sort((a, b) => Math.abs(Number(a.amount || 0) - meta.targetAmount) - Math.abs(Number(b.amount || 0) - meta.targetAmount))[0];
+
+    return matchingDebit ? Number(matchingDebit.amount || 0) : meta.targetAmount;
+};
+
 export default function ReportsPage() {
     const [expenses, setExpenses] = useState([]);
     const [aedConversions, setAedConversions] = useState([]);
@@ -135,7 +152,11 @@ export default function ReportsPage() {
             // the source debit is recorded when money is given to the conversion agent.
             aedConversions.forEach(c => {
                 const meta = getConversionMeta(c);
-                if (!meta.targetAmount) return;
+                const targetAmount = getLedgerTargetAmount(c, expenses);
+                if (!targetAmount) return;
+                const adjustedNote = closeEnough(targetAmount, meta.targetAmount)
+                    ? ''
+                    : ` (calculated ${fmt(meta.targetAmount)} ${meta.targetCurrency})`;
 
                 entries.push({
                     _type: 'income',
@@ -144,11 +165,11 @@ export default function ReportsPage() {
                     particular: `${meta.sourceCurrency}→${meta.targetCurrency} Conversion via ${c.conversion_agent_name || ''}`,
                     txId: '',
                     currency: meta.targetCurrency,
-                    credit: meta.targetAmount,
+                    credit: targetAmount,
                     debit: 0,
                     agent: c.conversion_agent_name || '',
                     rate: meta.rate || '',
-                    notes: `Converted from ${fmt(meta.sourceAmount)} ${meta.sourceCurrency}`,
+                    notes: `Converted from ${fmt(meta.sourceAmount)} ${meta.sourceCurrency}${adjustedNote}`,
                 });
             });
         }

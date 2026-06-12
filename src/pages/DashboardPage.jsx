@@ -70,6 +70,23 @@ const hasMatchingConversionFund = (conversion, expenses = []) => {
         || hasAmountCombination(matchingFunds.map(exp => exp.amount), meta.sourceAmount);
 };
 
+const getLedgerTargetAmount = (conversion, expenses = []) => {
+    const meta = getConversionMeta(conversion);
+    if (meta.targetCurrency !== 'AED') return meta.targetAmount;
+
+    const matchingDebit = expenses
+        .filter(exp => {
+            if (exp.category !== 'Conversion Fund Ops') return false;
+            if (exp.type === 'income') return false;
+            if (exp.currency !== meta.targetCurrency) return false;
+            if (conversion.date && exp.date && conversion.date !== exp.date) return false;
+            return closeEnough(exp.amount, meta.targetAmount, 5);
+        })
+        .sort((a, b) => Math.abs(Number(a.amount || 0) - meta.targetAmount) - Math.abs(Number(b.amount || 0) - meta.targetAmount))[0];
+
+    return matchingDebit ? Number(matchingDebit.amount || 0) : meta.targetAmount;
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
     const [expenses, setExpenses] = useState([]);
@@ -134,12 +151,13 @@ export default function DashboardPage() {
 
         aedConversions.forEach(c => {
             const meta = getConversionMeta(c);
-            if (!meta.targetAmount) return;
+            const targetAmount = getLedgerTargetAmount(c, expenses);
+            if (!targetAmount) return;
 
             entries.push({
                 _date: c.$createdAt || c.date,
                 currency: meta.targetCurrency,
-                credit: meta.targetAmount,
+                credit: targetAmount,
                 debit: 0,
             });
         });
