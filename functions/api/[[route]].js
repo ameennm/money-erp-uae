@@ -236,6 +236,133 @@ const resolveLimit = (c, queries) => {
     return Math.min(Math.max(parseInt(requested || '10000', 10) || 10000, 1), 10000)
 }
 
+const sanitizeInput = (table, body = {}) => {
+    const validCols = VALID_COLUMNS[table] || []
+    const safeBody = {}
+    Object.keys(body).forEach(key => {
+        if (validCols.includes(key)) safeBody[key] = normalizeValue(body[key])
+    })
+    return safeBody
+}
+
+const balanceFieldFor = (currency) => currency === 'INR' ? 'inr_balance' : (currency === 'SAR' ? 'sar_balance' : 'aed_balance')
+
+const round2 = (value) => Math.round((parseFloat(value) || 0) * 100) / 100
+
+const recordLedgerEntryFast = async (c, entryData) => {
+    const targetId = entryData.agent_id
+    if (!targetId) throw new Error('agent_id is required for ledger entry')
+
+    const { results: agentRows } = await c.env.DB.prepare('SELECT * FROM agents WHERE id = ?').bind(targetId).all()
+    const agent = agentRows[0]
+    if (!agent) throw new Error(`Agent ${targetId} not found`)
+
+    const currency = entryData.currency || 'SAR'
+    const type = entryData.type || 'debit'
+    const referenceType = entryData.reference_type || 'transaction'
+    const referenceId = entryData.reference_id
+    const amount = Math.abs(Number(entryData.amount) || 0)
+    if (!referenceId || !amount) return null
+
+    const { results: existingRows } = await c.env.DB.prepare(`
+        SELECT * FROM ledger_entries
+        WHERE reference_id = ? AND reference_type = ? AND agent_id = ? AND currency = ? AND type = ?
+        LIMIT 5
+    `).bind(referenceId, referenceType, targetId, currency, type).all()
+    const existing = existingRows.find(row => Math.abs((Number(row.amount) || 0) - amount) < 0.001)
+    if (existing) return { entry: sanitizeRow('ledger_entries', existing), agent: sanitizeRow('agents', agent) }
+
+    const balField = balanceFieldFor(currency)
+    const currentBalance = round2(agent[balField] || 0)
+    const sign = type === 'debit' ? 1 : -1
+    const newBalance = round2(currentBalance + amount * sign)
+    const ledgerId = genId()
+    const now = getNow()
+    const ledgerRow = {
+        id: ledgerId,
+        createdAt: now,
+        updatedAt: now,
+        agent_id: targetId,
+        agent_name: entryData.agent_name || agent.name,
+        agent_type: entryData.agent_type || agent.type || 'collection',
+        amount,
+        currency,
+        type,
+        reference_type: referenceType,
+        reference_id: referenceId,
+        description: entryData.description || '',
+        running_balance: newBalance,
+    }
+
+    await c.env.DB.prepare(`
+        INSERT INTO ledger_entries (
+            id, createdAt, updatedAt, agent_id, agent_name, agent_type, amount, currency,
+            type, reference_type, reference_id, description, running_balance
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+        ledgerRow.id, ledgerRow.createdAt, ledgerRow.updatedAt, ledgerRow.agent_id, ledgerRow.agent_name,
+        ledgerRow.agent_type, ledgerRow.amount, ledgerRow.currency, ledgerRow.type, ledgerRow.reference_type,
+        ledgerRow.reference_id, ledgerRow.description, ledgerRow.running_balance
+    ).run()
+
+    await c.env.DB.prepare(`UPDATE agents SET ${balField} = ?, updatedAt = ? WHERE id = ?`).bind(newBalance, now, targetId).run()
+
+    const updatedAgent = { ...agent, [balField]: newBalance, updatedAt: now }
+    await recordActivity(c, { action: 'created', table: 'ledger_entries', entityId: ledgerId, after: ledgerRow })
+    await recordActivity(c, { action: 'updated', table: 'agents', entityId: targetId, before: agent, after: updatedAgent })
+
+    return {
+        entry: sanitizeRow('ledger_entries', ledgerRow),
+        agent: sanitizeRow('agents', updatedAgent),
+    }
+}
+
+app.post('/transactions/with-ledger', async (c) => {
+    await ensureOptionalSchema(c.env.DB)
+    const body = await c.req.json()
+    const transactionBody = body.transaction || {}
+    const ledgerEntries = Array.isArray(body.ledger_entries) ? body.ledger_entries : []
+    const id = transactionBody.id || transactionBody.$id || genId()
+    const createdAt = transactionBody.createdAt || transactionBody.$createdAt || getNow()
+    const updatedAt = transactionBody.updatedAt || transactionBody.$updatedAt || createdAt
+
+    const safeTransaction = sanitizeInput('transactions', transactionBody)
+    const txKeys = ['id', 'createdAt', 'updatedAt', ...Object.keys(safeTransaction)]
+    const txValues = [id, createdAt, updatedAt, ...Object.values(safeTransaction)]
+
+    await c.env.DB.prepare(`INSERT INTO transactions (${txKeys.join(',')}) VALUES (${txKeys.map(() => '?').join(',')})`)
+        .bind(...txValues).run()
+
+    const transaction = { id, createdAt, updatedAt, ...safeTransaction }
+    await recordActivity(c, { action: 'created', table: 'transactions', entityId: id, after: transaction })
+
+    const createdLedgerEntries = []
+    const updatedAgents = []
+    const seenAgents = new Set()
+    for (const rawEntry of ledgerEntries) {
+        const result = await recordLedgerEntryFast(c, {
+            ...sanitizeInput('ledger_entries', rawEntry),
+            reference_type: rawEntry.reference_type || 'transaction',
+            reference_id: rawEntry.reference_id || id,
+        })
+        if (!result) continue
+        createdLedgerEntries.push(result.entry)
+        if (!seenAgents.has(result.agent.$id)) {
+            seenAgents.add(result.agent.$id)
+            updatedAgents.push(result.agent)
+        } else {
+            const index = updatedAgents.findIndex(agent => agent.$id === result.agent.$id)
+            if (index >= 0) updatedAgents[index] = result.agent
+        }
+    }
+
+    return c.json({
+        transaction: sanitizeRow('transactions', transaction),
+        ledger_entries: createdLedgerEntries,
+        updated_agents: updatedAgents,
+    })
+})
+
 // REST wrapper
 const crud = (path, table, getSort = 'createdAt DESC') => {
     app.get(`/${path}`, async (c) => {

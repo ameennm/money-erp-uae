@@ -100,6 +100,7 @@ const applyQueries = (data, queries = []) => {
 export const dbService = {
     // Transactions
     async createTransaction(data) { return fetchApi('/transactions', { method: 'POST', body: JSON.stringify(data) }); },
+    async createTransactionWithLedger(data) { return fetchApi('/transactions/with-ledger', { method: 'POST', body: JSON.stringify(data) }); },
     async listTransactions(q = []) {
         const data = await fetchApi(withQueries('/transactions', q));
         return applyQueries(data, q);

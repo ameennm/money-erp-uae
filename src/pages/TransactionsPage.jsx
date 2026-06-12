@@ -92,6 +92,30 @@ export default function TransactionsPage() {
 
     useEffect(() => { fetchAll(); }, []);
 
+    const mergeUpdatedAgents = (updatedAgents = []) => {
+        if (!updatedAgents.length) return;
+        const updatedById = new Map(updatedAgents.map(agent => [agent.$id, agent]));
+        setAgents(prev => prev.map(agent => updatedById.get(agent.$id) || agent));
+    };
+
+    const addSavedTransaction = (result) => {
+        if (result?.transaction) {
+            setTxs(prev => [result.transaction, ...prev.filter(tx => tx.$id !== result.transaction.$id)]);
+        }
+        mergeUpdatedAgents(result?.updated_agents || []);
+    };
+
+    const makeLedgerEntry = ({ agent, amount, currency, type, description }) => ({
+        agent_id: agent.$id,
+        agent_name: agent.name,
+        agent_type: agent.type || 'collection',
+        amount,
+        currency,
+        type,
+        reference_type: 'transaction',
+        description,
+    });
+
     // ── Calculations ──────────────────────────────────────────────────────────
 
 
@@ -226,19 +250,21 @@ export default function TransactionsPage() {
                         cur = target.currency || 'SAR';
                     }
 
-                    const created = await dbService.createTransaction(payload);
-
+                    const ledgerEntries = [];
                     if (target) {
-                        await ledgerService.recordEntry({
+                        ledgerEntries.push(makeLedgerEntry({
                             agent: target,
                             amount: absAmt,
                             currency: cur,
                             type: type,
-                            reference_type: 'transaction',
-                            reference_id: created.$id,
                             description: `MIGRATION: Initial balance for ${target.name}`
-                        });
+                        }));
                     }
+                    const result = await dbService.createTransactionWithLedger({
+                        transaction: payload,
+                        ledger_entries: ledgerEntries,
+                    });
+                    addSavedTransaction(result);
                     toast.success('Migration record created');
                 } else {
                     // ── STANDARD TRANSACTION LOGIC ──
@@ -262,40 +288,35 @@ export default function TransactionsPage() {
                     }
 
                     payload.tx_id = genTxId(txs);
-                    payload.creator_id = user.$id;
-                    payload.creator_name = user.name;
+                    payload.creator_id = user?.$id || user?.id || '';
+                    payload.creator_name = user?.name || user?.email || '';
                     payload.status = 'completed';
                     payload.actual_inr_distributed = round2(payload.inr_requested);
-
-                    const created = await dbService.createTransaction(payload);
+                    const ledgerEntries = [];
 
                     // ── Update distributor balance and ledger ──
                     const dist = agents.find(a => a.$id === payload.distributor_id);
                     if (dist) {
-                        await ledgerService.recordEntry({
+                        ledgerEntries.push(makeLedgerEntry({
                             agent: dist,
                             amount: payload.inr_requested,
                             currency: 'INR',
                             type: 'credit', // Agent gave INR to client
-                            reference_type: 'transaction',
-                            reference_id: created.$id,
                             description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
-                        });
+                        }));
                     }
 
                     // ── Update collection agent's balance and ledger ──
                     if (payload.collection_agent_id) {
                         const agent = agents.find(a => a.$id === payload.collection_agent_id);
                         if (agent) {
-                            await ledgerService.recordEntry({
+                            ledgerEntries.push(makeLedgerEntry({
                                 agent: agent,
                                 amount: payload.collected_amount,
                                 currency: payload.collected_currency,
                                 type: 'debit', // Agent received SAR from client
-                                reference_type: 'transaction',
-                                reference_id: created.$id,
                                 description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
-                            });
+                            }));
                         }
                     }
 
@@ -303,20 +324,22 @@ export default function TransactionsPage() {
                     if (payload.conversion_agent_id) {
                         const convAgent = agents.find(a => a.$id === payload.conversion_agent_id);
                         if (convAgent) {
-                            await ledgerService.recordEntry({
+                            ledgerEntries.push(makeLedgerEntry({
                                 agent: convAgent,
                                 amount: payload.collected_amount,
                                 currency: payload.collected_currency,
                                 type: 'debit', // Agent received SAR to convert
-                                reference_type: 'transaction',
-                                reference_id: created.$id,
                                 description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
-                            });
+                            }));
                         }
                     }
+                    const result = await dbService.createTransactionWithLedger({
+                        transaction: payload,
+                        ledger_entries: ledgerEntries,
+                    });
+                    addSavedTransaction(result);
                     toast.success('Transaction Logged');
                 }
-                fetchAll(); // Refresh everything to be safe
             }
             setModal(false);
         } catch (e) { toast.error(e.message); }
