@@ -40,7 +40,7 @@ export default function App() {
 
           {/* All authenticated users */}
           <Route path="/dashboard" element={
-            <ProtectedRoute><DashboardPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><DashboardPage /></ProtectedRoute>
           } />
           <Route path="/transactions" element={
             <ProtectedRoute><TransactionsPage /></ProtectedRoute>
@@ -48,35 +48,35 @@ export default function App() {
 
           {/* Collector + Admin */}
           <Route path="/conversion-agents" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
           } />
           <Route path="/credits" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><CreditsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><CreditsPage /></ProtectedRoute>
           } />
 
           {/* Admin + Collector — agent/employee management */}
           <Route path="/agents" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><AgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><AgentsPage /></ProtectedRoute>
           } />
           <Route path="/distributors" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><DistributorsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><DistributorsPage /></ProtectedRoute>
           } />
           <Route path="/expenses" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><ExpensesPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><ExpensesPage /></ProtectedRoute>
           } />
           <Route path="/reports" element={
-            <ProtectedRoute roles={['admin', 'employee', 'collector']}><ReportsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector']}><ReportsPage /></ProtectedRoute>
           } />
 
           {/* Admin + Employee operations */}
           <Route path="/data-export" element={
-            <ProtectedRoute roles={['admin', 'employee']}><DataExportPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin']}><DataExportPage /></ProtectedRoute>
           } />
           <Route path="/settings" element={
-            <ProtectedRoute roles={['admin', 'employee']}><SettingsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>
           } />
           <Route path="/reconciliation" element={
-            <ProtectedRoute roles={['admin', 'employee']}><ReconciliationPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin']}><ReconciliationPage /></ProtectedRoute>
           } />
 
           {/* Admin only — governance */}

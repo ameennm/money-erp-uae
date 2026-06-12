@@ -16,8 +16,46 @@ const TYPE_OPTIONS = [
     { value: 'income', label: 'Income', color: 'var(--brand-accent)' },
     { value: 'expense', label: 'Expenses', color: 'var(--status-failed)' }
 ];
+const ALL_CURRENCIES = ['SAR', 'AED', 'INR'];
 
 const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
+const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+
+const getConversionMeta = (conversion = {}) => {
+    const sourceCurrency = conversion.source_currency || (Number(conversion.sar_amount || 0) > 0 ? 'SAR' : 'AED');
+    const targetCurrency = conversion.target_currency || (sourceCurrency === 'SAR' ? 'AED' : 'INR');
+    const sourceAmount = sourceCurrency === 'SAR' ? Number(conversion.sar_amount || 0) : Number(conversion.aed_amount || 0);
+    const targetAmount = targetCurrency === 'AED'
+        ? Number(conversion.aed_amount || 0)
+        : Number(conversion.profit_inr || 0);
+    const rate = sourceCurrency === 'SAR' ? conversion.sar_rate : conversion.aed_rate;
+
+    return { sourceCurrency, targetCurrency, sourceAmount, targetAmount, rate };
+};
+
+const isLinkedConversionReceipt = (expense, conversions = []) => {
+    if (expense.category !== 'Conversion Receipt') return false;
+
+    return conversions.some(conversion => {
+        const meta = getConversionMeta(conversion);
+        if (conversion.receipt_expense_id && conversion.receipt_expense_id === expense.$id) return true;
+        if (conversion.conversion_agent_id !== expense.distributor_id) return false;
+        if (conversion.date && expense.date && conversion.date !== expense.date) return false;
+        if (expense.currency !== meta.targetCurrency) return false;
+        return closeEnough(expense.amount, meta.targetAmount);
+    });
+};
+
+const hasMatchingConversionFund = (conversion, expenses = []) => {
+    const meta = getConversionMeta(conversion);
+    return expenses.some(exp => {
+        if (exp.category !== 'Conversion Fund Ops') return false;
+        if (exp.distributor_id !== conversion.conversion_agent_id) return false;
+        if (conversion.date && exp.date && conversion.date !== exp.date) return false;
+        if (exp.currency !== meta.sourceCurrency) return false;
+        return closeEnough(exp.amount, meta.sourceAmount);
+    });
+};
 
 export default function ReportsPage() {
     const [expenses, setExpenses] = useState([]);
@@ -53,18 +91,42 @@ export default function ReportsPage() {
         const entries = [];
 
         if (typeFilter.includes('income')) {
-            expenses.filter(e => e.type === 'income' && !isInternalLedgerTransfer(e)).forEach(e => {
+            expenses
+                .filter(e => e.type === 'income' && !isInternalLedgerTransfer(e))
+                .filter(e => !isLinkedConversionReceipt(e, aedConversions))
+                .forEach(e => {
+                    entries.push({
+                        _type: 'income',
+                        _date: e.$createdAt,
+                        _id: e.$id,
+                        particular: e.title || 'Income',
+                        txId: '',
+                        currency: e.currency || 'AED',
+                        credit: Number(e.amount) || 0,
+                        debit: 0,
+                        agent: '',
+                        notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
+                    });
+                });
+
+            // Conversion settlement target side only:
+            // the source debit is recorded when money is given to the conversion agent.
+            aedConversions.forEach(c => {
+                const meta = getConversionMeta(c);
+                if (!meta.targetAmount) return;
+
                 entries.push({
                     _type: 'income',
-                    _date: e.$createdAt,
-                    _id: e.$id,
-                    particular: e.title || 'Income',
+                    _date: c.$createdAt || c.date,
+                    _id: c.$id + '_target',
+                    particular: `${meta.sourceCurrency}→${meta.targetCurrency} Conversion via ${c.conversion_agent_name || ''}`,
                     txId: '',
-                    currency: e.currency || 'AED',
-                    credit: Number(e.amount) || 0,
+                    currency: meta.targetCurrency,
+                    credit: meta.targetAmount,
                     debit: 0,
-                    agent: '',
-                    notes: `${e.category || ''}${e.notes ? ' — ' + e.notes : ''}`,
+                    agent: c.conversion_agent_name || '',
+                    rate: meta.rate || '',
+                    notes: `Converted from ${fmt(meta.sourceAmount)} ${meta.sourceCurrency}`,
                 });
             });
         }
@@ -88,36 +150,22 @@ export default function ReportsPage() {
                     });
                 });
 
-            // Show SAR -> AED Conversions in the ledger
             aedConversions.forEach(c => {
-                // SAR Out (Debit)
+                const meta = getConversionMeta(c);
+                if (!meta.sourceAmount || hasMatchingConversionFund(c, expenses)) return;
+
                 entries.push({
                     _type: 'expense',
                     _date: c.$createdAt || c.date,
-                    _id: c.$id + '_sar',
-                    particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
+                    _id: c.$id + '_source',
+                    particular: `${meta.sourceCurrency}→${meta.targetCurrency} Conversion via ${c.conversion_agent_name || ''}`,
                     txId: '',
-                    currency: 'SAR',
+                    currency: meta.sourceCurrency,
                     credit: 0,
-                    debit: Number(c.sar_amount) || 0,
+                    debit: meta.sourceAmount,
                     agent: c.conversion_agent_name || '',
-                    rate: c.sar_rate || c.aed_rate || '',
-                    notes: `Rate: ${c.sar_rate || c.aed_rate || ''}`,
-                });
-
-                // AED In (Credit)
-                entries.push({
-                    _type: 'income',
-                    _date: c.$createdAt || c.date,
-                    _id: c.$id + '_aed',
-                    particular: `SAR→AED Conversion via ${c.conversion_agent_name || ''}`,
-                    txId: '',
-                    currency: 'AED',
-                    credit: Number(c.aed_amount) || 0,
-                    debit: 0,
-                    agent: c.conversion_agent_name || '',
-                    rate: c.sar_rate || c.aed_rate || '',
-                    notes: `Converted from ${Number(c.sar_amount) || 0} SAR`,
+                    rate: meta.rate || '',
+                    notes: 'Source amount for conversion',
                 });
             });
         }
@@ -154,8 +202,10 @@ export default function ReportsPage() {
     }, [allEntries, dateRange, currencyFilter, search]);
 
     // Ledger totals per currency
-    const allCurrencies = ['SAR', 'AED', 'INR'];
-    const displayCurrencies = currencyFilter === 'All' ? allCurrencies : [currencyFilter];
+    const displayCurrencies = useMemo(
+        () => currencyFilter === 'All' ? ALL_CURRENCIES : [currencyFilter],
+        [currencyFilter]
+    );
 
     const totals = useMemo(() => {
         const result = {};

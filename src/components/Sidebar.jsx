@@ -20,17 +20,7 @@ const NAV = {
         { label: 'Settings', path: '/settings', icon: Settings },
     ],
     employee: [
-        { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
-        { label: 'Conversion Agents', path: '/conversion-agents', icon: RefreshCw },
-        { label: 'Agents', path: '/agents', icon: Users },
-        { label: 'Distributors', path: '/distributors', icon: UserCog },
-        { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
-        { label: 'Credits', path: '/credits', icon: Wallet },
-        { label: 'Data Export', path: '/data-export', icon: Database },
-        { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
-        { label: 'Reconciliation', path: '/reconciliation', icon: Database },
-        { label: 'Settings', path: '/settings', icon: Settings },
     ],
     collector: [
         { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },

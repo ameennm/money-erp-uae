@@ -11,6 +11,42 @@ import { applyDateRange, round2 } from '../utils/filterHelpers';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
+const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
+
+const getConversionMeta = (conversion = {}) => {
+    const sourceCurrency = conversion.source_currency || (Number(conversion.sar_amount || 0) > 0 ? 'SAR' : 'AED');
+    const targetCurrency = conversion.target_currency || (sourceCurrency === 'SAR' ? 'AED' : 'INR');
+    const sourceAmount = sourceCurrency === 'SAR' ? Number(conversion.sar_amount || 0) : Number(conversion.aed_amount || 0);
+    const targetAmount = targetCurrency === 'AED'
+        ? Number(conversion.aed_amount || 0)
+        : Number(conversion.profit_inr || 0);
+
+    return { sourceCurrency, targetCurrency, sourceAmount, targetAmount };
+};
+
+const isLinkedConversionReceipt = (expense, conversions = []) => {
+    if (expense.category !== 'Conversion Receipt') return false;
+
+    return conversions.some(conversion => {
+        const meta = getConversionMeta(conversion);
+        if (conversion.receipt_expense_id && conversion.receipt_expense_id === expense.$id) return true;
+        if (conversion.conversion_agent_id !== expense.distributor_id) return false;
+        if (conversion.date && expense.date && conversion.date !== expense.date) return false;
+        if (expense.currency !== meta.targetCurrency) return false;
+        return closeEnough(expense.amount, meta.targetAmount);
+    });
+};
+
+const hasMatchingConversionFund = (conversion, expenses = []) => {
+    const meta = getConversionMeta(conversion);
+    return expenses.some(exp => {
+        if (exp.category !== 'Conversion Fund Ops') return false;
+        if (exp.distributor_id !== conversion.conversion_agent_id) return false;
+        if (conversion.date && exp.date && conversion.date !== exp.date) return false;
+        if (exp.currency !== meta.sourceCurrency) return false;
+        return closeEnough(exp.amount, meta.sourceAmount);
+    });
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
@@ -39,14 +75,17 @@ export default function DashboardPage() {
     const allEntries = useMemo(() => {
         const entries = [];
 
-        expenses.filter(e => e.type === 'income' && !isInternalLedgerTransfer(e)).forEach(e => {
-            entries.push({
-                _date: e.$createdAt,
-                currency: e.currency || 'AED',
-                credit: Number(e.amount) || 0,
-                debit: 0,
+        expenses
+            .filter(e => e.type === 'income' && !isInternalLedgerTransfer(e))
+            .filter(e => !isLinkedConversionReceipt(e, aedConversions))
+            .forEach(e => {
+                entries.push({
+                    _date: e.$createdAt,
+                    currency: e.currency || 'AED',
+                    credit: Number(e.amount) || 0,
+                    debit: 0,
+                });
             });
-        });
 
         expenses
             .filter(e => e.type !== 'income' && !isInternalLedgerTransfer(e))
@@ -60,17 +99,25 @@ export default function DashboardPage() {
             });
 
         aedConversions.forEach(c => {
-            entries.push({
-                _date: c.$createdAt || c.date,
-                currency: 'SAR',
-                credit: 0,
-                debit: Number(c.sar_amount) || 0,
-            });
+            const meta = getConversionMeta(c);
+            if (!meta.sourceAmount || hasMatchingConversionFund(c, expenses)) return;
 
             entries.push({
                 _date: c.$createdAt || c.date,
-                currency: 'AED',
-                credit: Number(c.aed_amount) || 0,
+                currency: meta.sourceCurrency,
+                credit: 0,
+                debit: meta.sourceAmount,
+            });
+        });
+
+        aedConversions.forEach(c => {
+            const meta = getConversionMeta(c);
+            if (!meta.targetAmount) return;
+
+            entries.push({
+                _date: c.$createdAt || c.date,
+                currency: meta.targetCurrency,
+                credit: meta.targetAmount,
                 debit: 0,
             });
         });

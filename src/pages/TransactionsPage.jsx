@@ -14,7 +14,6 @@ import * as XLSX from 'xlsx';
 // Filter components
 import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
 import { applyDateRange, round2 } from '../utils/filterHelpers';
-import { isBusinessAdmin } from '../utils/roles';
 import { TRANSACTION_STATUSES } from '../constants';
 
 const START_TX_NUM = 20261;
@@ -58,8 +57,10 @@ const EMPTY = {
 export default function TransactionsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const { role, user } = useAuth();
-    const isAdmin = isBusinessAdmin(role);
-    const isCollector = role === 'collector' || isAdmin;
+    const isAdmin = role === 'admin';
+    const isEmployeeOnly = role === 'employee';
+    const canCreateTransaction = role === 'collector' || role === 'employee' || isAdmin;
+    const canEditTransaction = role === 'collector' || isAdmin;
     const isCollectorOnly = role === 'collector';
 
     const [txs, setTxs] = useState([]);
@@ -108,6 +109,7 @@ export default function TransactionsPage() {
         if (isSavingRef.current) return;
 
         const { is_petty_cash } = form;
+        if (is_petty_cash && !isAdmin) return toast.error('Only admin can use migration mode');
         const isRequired = !is_petty_cash;
 
         // Validation: If petty cash and no target, still allowed (general migration)
@@ -141,6 +143,7 @@ export default function TransactionsPage() {
             });
 
             if (editTx) {
+                if (!canEditTransaction) return toast.error('You can only add new transactions');
                 if (isCollectorOnly) {
                     payload.edit_pending_approval = true;
                     await dbService.updateTransaction(editTx.$id, payload);
@@ -341,6 +344,13 @@ export default function TransactionsPage() {
     useEffect(() => {
         const editId = searchParams.get('edit');
         if (!editId || txs.length === 0) return;
+        if (!canEditTransaction) {
+            toast.error('You can only add new transactions');
+            const next = new URLSearchParams(searchParams);
+            next.delete('edit');
+            setSearchParams(next, { replace: true });
+            return;
+        }
 
         const target = txs.find(tx => tx.$id === editId);
         if (!target) {
@@ -357,7 +367,7 @@ export default function TransactionsPage() {
         const next = new URLSearchParams(searchParams);
         next.delete('edit');
         setSearchParams(next, { replace: true });
-    }, [txs, searchParams, setSearchParams]);
+    }, [txs, searchParams, setSearchParams, canEditTransaction]);
 
     const handleDelete = async (tx) => {
         if (!isAdmin) return toast.error('Only admins can delete transactions');
@@ -426,100 +436,113 @@ export default function TransactionsPage() {
 
     return (
         <Layout title="Transactions">
-            <FilterBar>
-                <DateRangeFilter
-                    value={dateRange}
-                    onChange={setDateRange}
-                />
-                <SearchInput
-                    value={search}
-                    onChange={setSearch}
-                    placeholder="Search client or ID..."
-                />
-                <div className="flex gap-2 flex-wrap ml-auto">
-                    {isAdmin && (
-                        <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
-                            <Download size={16} /> Excel
-                        </button>
-                    )}
-                    {isCollector && (
+            {isEmployeeOnly ? (
+                <div className="card" style={{ maxWidth: 520 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <h3 className="card-title" style={{ margin: 0 }}>Add Transaction</h3>
                         <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
-                            <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
+                            <Plus size={16} /> New Transaction
                         </button>
-                    )}
+                    </div>
                 </div>
-            </FilterBar>
+            ) : (
+                <>
+                    <FilterBar>
+                        <DateRangeFilter
+                            value={dateRange}
+                            onChange={setDateRange}
+                        />
+                        <SearchInput
+                            value={search}
+                            onChange={setSearch}
+                            placeholder="Search client or ID..."
+                        />
+                        <div className="flex gap-2 flex-wrap ml-auto">
+                            {isAdmin && (
+                                <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
+                                    <Download size={16} /> Excel
+                                </button>
+                            )}
+                            {canCreateTransaction && (
+                                <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
+                                    <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
+                                </button>
+                            )}
+                        </div>
+                    </FilterBar>
 
-            <div className="card">
-                <div className="table-wrapper">
-                    <table className="data-table">
-                        <thead>
-                            <tr>
-                                <th style={{ width: 100 }}>TX ID</th>
-                                <th>Client</th>
-                                <th style={{ textAlign: 'right', width: 140 }}>Requested</th>
-                                <th style={{ textAlign: 'right', width: 160 }}>Amount</th>
-                                <th>Agent</th>
-                                {isAdmin && <th style={{ textAlign: 'right', width: 120 }}>Profit</th>}
-                                {isAdmin && <th>Distributor</th>}
-                                <th style={{ width: 120 }}>Status</th>
-                                <th style={{ width: 100 }}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filtered.map(tx => {
-                                const profitVal = Number(tx.profit_inr) || 0;
-                                return (
-                                    <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
-                                        <td className="font-bold">
-                                            #{tx.tx_id}
-                                            {tx.edit_pending_approval && (
-                                                <span style={{ marginLeft: 6, fontSize: 10, background: '#ffaa32', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>PENDING EDIT</span>
-                                            )}
-                                        </td>
-                                        <td>{tx.client_name}</td>
-                                        <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>
-                                            {!tx.is_petty_cash || (tx.distributor_id && tx.inr_requested) ? (
-                                                <>₹{Number(tx.inr_requested || 0).toLocaleString('en-IN')}</>
-                                            ) : '—'}
-                                        </td>
-                                        <td className={`currency ${(tx.collected_currency || 'SAR').toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
-                                            {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency || 'SAR'}</span>
-                                        </td>
-                                        <td>{tx.collection_agent_name || '—'}</td>
-                                        {isAdmin && (
-                                            <td style={{ textAlign: 'right', color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
-                                                {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')}` : '—'}
-                                            </td>
-                                        )}
-                                        {isAdmin && (
-                                            <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                                                {tx.distributor_name || '—'}
-                                            </td>
-                                        )}
-                                        <td>{statusBadge(tx.status)}</td>
-                                        <td>
-                                            <div className="flex gap-2">
-                                                {isCollector && (
-                                                    <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
-                                                )}
-                                                {isAdmin && tx.edit_pending_approval && (
-                                                    <button className="btn btn-sm" style={{ background: '#22c55e', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12 }} onClick={() => handleApproveEdit(tx)} title="Approve Edit">✓ Approve</button>
+                    <div className="card">
+                        <div className="table-wrapper">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th style={{ width: 100 }}>TX ID</th>
+                                        <th>Client</th>
+                                        <th style={{ textAlign: 'right', width: 140 }}>Requested</th>
+                                        <th style={{ textAlign: 'right', width: 160 }}>Amount</th>
+                                        <th>Agent</th>
+                                        {isAdmin && <th style={{ textAlign: 'right', width: 120 }}>Profit</th>}
+                                        {isAdmin && <th>Distributor</th>}
+                                        <th style={{ width: 120 }}>Status</th>
+                                        <th style={{ width: 100 }}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filtered.map(tx => {
+                                        const profitVal = Number(tx.profit_inr) || 0;
+                                        return (
+                                            <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
+                                                <td className="font-bold">
+                                                    #{tx.tx_id}
+                                                    {tx.edit_pending_approval && (
+                                                        <span style={{ marginLeft: 6, fontSize: 10, background: '#ffaa32', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>PENDING EDIT</span>
+                                                    )}
+                                                </td>
+                                                <td>{tx.client_name}</td>
+                                                <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>
+                                                    {!tx.is_petty_cash || (tx.distributor_id && tx.inr_requested) ? (
+                                                        <>₹{Number(tx.inr_requested || 0).toLocaleString('en-IN')}</>
+                                                    ) : '—'}
+                                                </td>
+                                                <td className={`currency ${(tx.collected_currency || 'SAR').toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
+                                                    {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency || 'SAR'}</span>
+                                                </td>
+                                                <td>{tx.collection_agent_name || '—'}</td>
+                                                {isAdmin && (
+                                                    <td style={{ textAlign: 'right', color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
+                                                        {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')}` : '—'}
+                                                    </td>
                                                 )}
                                                 {isAdmin && (
-                                                    <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                                        {tx.distributor_name || '—'}
+                                                    </td>
                                                 )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                                                <td>{statusBadge(tx.status)}</td>
+                                                <td>
+                                                    <div className="flex gap-2">
+                                                        {canEditTransaction && (
+                                                            <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
+                                                        )}
+                                                        {isAdmin && tx.edit_pending_approval && (
+                                                            <button className="btn btn-sm" style={{ background: '#22c55e', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12 }} onClick={() => handleApproveEdit(tx)} title="Approve Edit">✓ Approve</button>
+                                                        )}
+                                                        {isAdmin && (
+                                                            <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </>
+            )}
 
             {/* Creation Modal */}
             {modal && (
@@ -531,27 +554,29 @@ export default function TransactionsPage() {
                         </div>
                          <form onSubmit={handleSave}>
                             <div className="modal-body">
-                                <div className="form-group" style={{ marginBottom: 20 }}>
-                                    <label className="flex items-center gap-2 cursor-pointer p-3 rounded-xl transition-all" 
-                                        style={{ 
-                                            border: form.is_petty_cash ? '2px solid var(--brand-accent)' : '1px solid rgba(255,255,255,0.1)',
-                                            background: form.is_petty_cash ? 'rgba(74,158,255,0.08)' : 'transparent'
-                                        }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={form.is_petty_cash === 1}
-                                            onChange={e => {
-                                                const checked = e.target.checked;
-                                                setForm({ ...EMPTY, is_petty_cash: checked ? 1 : 0 });
-                                            }}
-                                            className="w-5 h-5 rounded-md text-brand-accent focus:ring-brand-accent"
-                                        />
-                                        <div className="flex flex-col">
-                                            <span style={{ fontSize: 14, fontWeight: 800, color: form.is_petty_cash ? 'var(--brand-accent)' : 'var(--text-primary)' }}>MIGRATION MODE (Petty Cash)</span>
-                                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Direct balance adjustment for historical data. Positive = They owe us.</span>
-                                        </div>
-                                    </label>
-                                </div>
+                                {isAdmin && (
+                                    <div className="form-group" style={{ marginBottom: 20 }}>
+                                        <label className="flex items-center gap-2 cursor-pointer p-3 rounded-xl transition-all"
+                                            style={{
+                                                border: form.is_petty_cash ? '2px solid var(--brand-accent)' : '1px solid rgba(255,255,255,0.1)',
+                                                background: form.is_petty_cash ? 'rgba(74,158,255,0.08)' : 'transparent'
+                                            }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={form.is_petty_cash === 1}
+                                                onChange={e => {
+                                                    const checked = e.target.checked;
+                                                    setForm({ ...EMPTY, is_petty_cash: checked ? 1 : 0 });
+                                                }}
+                                                className="w-5 h-5 rounded-md text-brand-accent focus:ring-brand-accent"
+                                            />
+                                            <div className="flex flex-col">
+                                                <span style={{ fontSize: 14, fontWeight: 800, color: form.is_petty_cash ? 'var(--brand-accent)' : 'var(--text-primary)' }}>MIGRATION MODE (Petty Cash)</span>
+                                                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Direct balance adjustment for historical data. Positive = They owe us.</span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                )}
 
                                 {form.is_petty_cash ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
