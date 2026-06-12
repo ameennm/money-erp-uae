@@ -1,4 +1,4 @@
-import { dbService } from './appwrite';
+import { dbService, Query } from './appwrite';
 
 const round2 = (n) => Math.round((parseFloat(n) || 0) * 100) / 100;
 const matchesReference = (entryRef, referenceId) => {
@@ -37,7 +37,11 @@ export const ledgerService = {
         // Debit increases balance (agent owes more), Credit decreases it (agent paid/distributed)
         const sign = type === 'debit' ? 1 : -1;
         const absAmount = Math.abs(Number(amount));
-        const existingEntries = await dbService.listLedgerEntries();
+        const existingEntries = await dbService.listLedgerEntries([
+            Query.equal('reference_id', reference_id),
+            Query.equal('reference_type', reference_type),
+            Query.equal('agent_id', targetId),
+        ]);
         const existingEntry = existingEntries.documents.find(e =>
             e.reference_id === reference_id &&
             e.reference_type === reference_type &&
@@ -77,7 +81,14 @@ export const ledgerService = {
         if (!reference_id || !reference_type) return;
 
         // 1. Find the entries to delete
-        const entriesRes = await dbService.listLedgerEntries();
+        const ref = String(reference_id);
+        const candidateRefs = [ref, 'src', 'tgt', 'coll', 'dist', 'conv', 'sar', 'aed', 'source', 'target'].map((suffix, index) =>
+            index === 0 ? suffix : `${ref}_${suffix}`
+        );
+        const entriesRes = await dbService.listLedgerEntries([
+            Query.equal('reference_type', reference_type),
+            Query.or(candidateRefs.map(candidateRef => Query.equal('reference_id', candidateRef))),
+        ]);
         const relatedEntries = entriesRes.documents.filter(e =>
             matchesReference(e.reference_id, reference_id) && e.reference_type === reference_type
         );
@@ -113,7 +124,10 @@ export const ledgerService = {
      */
     async reverseEntry(reference_id, reference_type, descriptionPrefix = 'REVERSED: ') {
         // Find the entry to reverse
-        const entries = await dbService.listLedgerEntries();
+        const entries = await dbService.listLedgerEntries([
+            Query.equal('reference_id', reference_id),
+            Query.equal('reference_type', reference_type),
+        ]);
         const relatedEntries = entries.documents.filter(e => e.reference_id === reference_id && e.reference_type === reference_type);
 
         for (const entry of relatedEntries) {

@@ -32,6 +32,11 @@ const fetchApi = async (path, options = {}) => {
     return res.json();
 };
 
+const withQueries = (path, queries = []) => {
+    if (!queries.length) return path;
+    return `${path}?q=${encodeURIComponent(JSON.stringify(queries))}`;
+};
+
 export const Query = {
     equal: (key, val) => ({ type: 'equal', key, val }),
     orderDesc: (key) => ({ type: 'orderDesc', key }),
@@ -96,7 +101,7 @@ export const dbService = {
     // Transactions
     async createTransaction(data) { return fetchApi('/transactions', { method: 'POST', body: JSON.stringify(data) }); },
     async listTransactions(q = []) {
-        const data = await fetchApi('/transactions');
+        const data = await fetchApi(withQueries('/transactions', q));
         return applyQueries(data, q);
     },
     async getTransaction(id) { return fetchApi(`/transactions/${id}`); },
@@ -105,7 +110,7 @@ export const dbService = {
 
     // Collection Agents
     async listAgents(q = []) {
-        const data = await fetchApi('/agents');
+        const data = await fetchApi(withQueries('/agents', q));
         return applyQueries(data, q);
     },
     async createAgent(data) { return fetchApi('/agents', { method: 'POST', body: JSON.stringify(data) }); },
@@ -115,7 +120,7 @@ export const dbService = {
 
     // Employees
     async listEmployees(q = []) {
-        const data = await fetchApi('/employees');
+        const data = await fetchApi(withQueries('/employees', q));
         return applyQueries(data, q);
     },
     async createEmployee(data) { return fetchApi('/employees', { method: 'POST', body: JSON.stringify(data) }); },
@@ -124,7 +129,7 @@ export const dbService = {
 
     // Expenses
     async listExpenses(q = []) {
-        const data = await fetchApi('/expenses');
+        const data = await fetchApi(withQueries('/expenses', q));
         return applyQueries(data, q);
     },
     async createExpense(data) { return fetchApi('/expenses', { method: 'POST', body: JSON.stringify(data) }); },
@@ -134,7 +139,7 @@ export const dbService = {
 
     // Credits
     async listCredits(q = []) {
-        const data = await fetchApi('/credits');
+        const data = await fetchApi(withQueries('/credits', q));
         return applyQueries(data, q);
     },
     async createCredit(data) { return fetchApi('/credits', { method: 'POST', body: JSON.stringify(data) }); },
@@ -143,7 +148,7 @@ export const dbService = {
 
     // AED Conversions
     async listAedConversions(q = []) {
-        const data = await fetchApi('/aed_conversions');
+        const data = await fetchApi(withQueries('/aed_conversions', q));
         return applyQueries(data, q);
     },
     async createAedConversion(data) { return fetchApi('/aed_conversions', { method: 'POST', body: JSON.stringify(data) }); },
@@ -165,7 +170,7 @@ export const dbService = {
 
     // Ledger Entries
     async listLedgerEntries(q = []) {
-        const data = await fetchApi('/ledger_entries');
+        const data = await fetchApi(withQueries('/ledger_entries', q));
         return applyQueries(data, q);
     },
     async createLedgerEntry(data) { return fetchApi('/ledger_entries', { method: 'POST', body: JSON.stringify(data) }); },
@@ -174,7 +179,7 @@ export const dbService = {
 
     // Activity Logs
     async listActivityLogs(q = []) {
-        const data = await fetchApi('/activity_logs');
+        const data = await fetchApi(withQueries('/activity_logs', q));
         return applyQueries(data, q);
     },
     async createActivityLog(data) { return fetchApi('/activity_logs', { method: 'POST', body: JSON.stringify(data) }); },

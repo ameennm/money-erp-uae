@@ -174,15 +174,77 @@ const VALID_COLUMNS = {
     activity_logs: ['actor_id', 'actor_name', 'actor_email', 'actor_role', 'action', 'entity_type', 'entity_id', 'entity_label', 'details'],
 };
 
+const validColumnsFor = (table) => new Set(['id', 'createdAt', 'updatedAt', ...(VALID_COLUMNS[table] || [])])
+
+const parseListQueries = (c) => {
+    const raw = c.req.query('q')
+    if (!raw) return []
+    try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed : []
+    } catch {
+        return []
+    }
+}
+
+const buildEqualCondition = (table, query) => {
+    const validCols = validColumnsFor(table)
+    if (!query || query.type !== 'equal' || !validCols.has(query.key)) return null
+    if (query.val === null) return { sql: `${query.key} IS NULL`, values: [] }
+    return { sql: `${query.key} = ?`, values: [normalizeValue(query.val)] }
+}
+
+const buildWhereClause = (table, queries) => {
+    const clauses = []
+    const values = []
+
+    for (const query of queries) {
+        if (query.type === 'equal') {
+            const condition = buildEqualCondition(table, query)
+            if (!condition) continue
+            clauses.push(condition.sql)
+            values.push(...condition.values)
+        } else if (query.type === 'or' && Array.isArray(query.subQueries)) {
+            const subConditions = query.subQueries
+                .map(subQuery => buildEqualCondition(table, subQuery))
+                .filter(Boolean)
+            if (!subConditions.length) continue
+            clauses.push(`(${subConditions.map(condition => condition.sql).join(' OR ')})`)
+            subConditions.forEach(condition => values.push(...condition.values))
+        }
+    }
+
+    return {
+        sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '',
+        values,
+    }
+}
+
+const resolveOrderBy = (table, queries, fallback) => {
+    const validCols = validColumnsFor(table)
+    const requested = queries.find(query => query.type === 'orderDesc' || query.type === 'orderAsc')
+    if (requested && validCols.has(requested.key)) {
+        return `${requested.key} ${requested.type === 'orderDesc' ? 'DESC' : 'ASC'}`
+    }
+    return fallback
+}
+
+const resolveLimit = (c, queries) => {
+    const queryLimit = queries.find(query => query.type === 'limit')?.val
+    const requested = queryLimit ?? c.req.query('limit')
+    if (requested === 'all') return 10000
+    return Math.min(Math.max(parseInt(requested || '10000', 10) || 10000, 1), 10000)
+}
+
 // REST wrapper
 const crud = (path, table, getSort = 'createdAt DESC') => {
     app.get(`/${path}`, async (c) => {
         await ensureOptionalSchema(c.env.DB)
-        const requested = c.req.query('limit')
-        const limit = requested === 'all'
-            ? 10000
-            : Math.min(Math.max(parseInt(requested || '10000', 10) || 10000, 1), 10000)
-        const { results } = await c.env.DB.prepare(`SELECT * FROM ${table} ORDER BY ${getSort} LIMIT ?`).bind(limit).all()
+        const queries = parseListQueries(c)
+        const where = buildWhereClause(table, queries)
+        const orderBy = resolveOrderBy(table, queries, getSort)
+        const limit = resolveLimit(c, queries)
+        const { results } = await c.env.DB.prepare(`SELECT * FROM ${table}${where.sql} ORDER BY ${orderBy} LIMIT ?`).bind(...where.values, limit).all()
         // Map id to $id and createdAt to $createdAt for Appwrite compatibility
         const mapped = results.map(r => sanitizeRow(table, r))
         return c.json(mapped)

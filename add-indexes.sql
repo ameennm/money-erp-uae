@@ -29,3 +29,27 @@ CREATE INDEX IF NOT EXISTS idx_credits_createdAt ON credits(createdAt);
 
 -- AED Conversions
 CREATE INDEX IF NOT EXISTS idx_aed_conv_createdAt ON aed_conversions(createdAt);
+
+-- Ledger Entries
+CREATE INDEX IF NOT EXISTS idx_ledger_reference ON ledger_entries(reference_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_agent ON ledger_entries(agent_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_agent_reference ON ledger_entries(agent_id, reference_type, reference_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_createdAt ON ledger_entries(createdAt);
+
+-- Activity Logs
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id TEXT PRIMARY KEY,
+    createdAt TEXT,
+    updatedAt TEXT,
+    actor_id TEXT,
+    actor_name TEXT,
+    actor_email TEXT,
+    actor_role TEXT,
+    action TEXT,
+    entity_type TEXT,
+    entity_id TEXT,
+    entity_label TEXT,
+    details TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_activity_createdAt ON activity_logs(createdAt);
+CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_logs(entity_type, entity_id);
