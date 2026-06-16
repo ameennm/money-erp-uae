@@ -20,6 +20,61 @@ const formatTransactionRates = (tx) => {
     ].filter(Boolean).join(' | ');
 };
 
+const fmtTransactionAmount = (amount, currency) => {
+    if (!amount && amount !== 0) return '';
+    const value = fmt(amount);
+    return currency === 'INR' ? `₹${value}` : `${value} ${currency || ''}`.trim();
+};
+
+const appendTransactionContext = (description = '', details = []) => {
+    const lowerDescription = description.toLowerCase();
+    const extras = details
+        .filter(item => item.value)
+        .filter(item => !lowerDescription.includes(String(item.value).toLowerCase()))
+        .map(item => `${item.label}: ${item.value}`);
+
+    return extras.length ? `${description} | ${extras.join(' | ')}` : description;
+};
+
+const ledgerParticularWithTransaction = (entry, tx, agent) => {
+    if (!tx) return entry.description;
+
+    const isDistributorRow = agent?.$id === tx.distributor_id;
+    const isCollectionAgentRow = agent?.$id === tx.collection_agent_id;
+    const isConversionAgentRow = agent?.$id === tx.conversion_agent_id;
+    const collected = fmtTransactionAmount(tx.collected_amount, tx.collected_currency);
+    const inr = fmtTransactionAmount(tx.inr_requested, 'INR');
+
+    if (isDistributorRow) {
+        return appendTransactionContext(entry.description, [
+            { label: 'Agent', value: tx.collection_agent_name },
+            { label: 'Collected', value: collected },
+            { label: 'Conversion', value: tx.conversion_agent_name },
+        ]);
+    }
+
+    if (isCollectionAgentRow) {
+        return appendTransactionContext(entry.description, [
+            { label: 'Distributor', value: tx.distributor_name },
+            { label: 'INR', value: inr },
+            { label: 'Conversion', value: tx.conversion_agent_name },
+        ]);
+    }
+
+    if (isConversionAgentRow) {
+        return appendTransactionContext(entry.description, [
+            { label: 'Distributor', value: tx.distributor_name },
+            { label: 'Agent', value: tx.collection_agent_name },
+            { label: 'INR', value: inr },
+        ]);
+    }
+
+    return appendTransactionContext(entry.description, [
+        { label: 'Agent', value: tx.collection_agent_name },
+        { label: 'Distributor', value: tx.distributor_name },
+    ]);
+};
+
 export default function LedgerModal({ agent, onClose, onDeleteEntry, onEditEntry }) {
     const [entries, setEntries] = useState([]);
     const [transactions, setTransactions] = useState([]);
@@ -67,7 +122,7 @@ export default function LedgerModal({ agent, onClose, onDeleteEntry, onEditEntry
                 _id: e.$id,
                 _date: e.createdAt,
                 _type: e.type,
-                particular: e.description,
+                particular: ledgerParticularWithTransaction(e, tx, agent),
                 reference_type: e.reference_type,
                 reference_id: e.reference_id,
                 txId: tx?.tx_id || '',
@@ -77,7 +132,7 @@ export default function LedgerModal({ agent, onClose, onDeleteEntry, onEditEntry
                 debit: e.type === 'debit' ? Number(e.amount) : 0,
             };
         });
-    }, [entries, transactionById]);
+    }, [entries, transactionById, agent]);
 
     const allEntriesWithBalance = useMemo(() => {
         const sorted = [...allEntries].sort((a, b) => new Date(a._date) - new Date(b._date));

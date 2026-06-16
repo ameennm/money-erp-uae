@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authService, dbService, Query } from '../lib/appwrite';
+import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { Plus, X, Pencil, Trash2, Users, Banknote } from 'lucide-react';
 import { SearchInput } from '../components/filters';
@@ -14,6 +15,9 @@ const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', t
 
 export default function AgentsPage() {
     const navigate = useNavigate();
+    const { role } = useAuth();
+    const canManage = canOperate(role);
+    const canEditTransactions = canManage || role === 'employee';
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
@@ -25,7 +29,6 @@ export default function AgentsPage() {
     const [paymentAgent, setPaymentAgent] = useState(null);
     const [paymentAmount, setPaymentAmount] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [user, setUser] = useState(null);
 
     const fetch = async () => {
         setLoading(true);
@@ -41,11 +44,16 @@ export default function AgentsPage() {
 
     useEffect(() => {
         fetch();
-        authService.getCurrentUser().then(setUser);
     }, []);
 
-    const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
+    const openNew = () => {
+        if (!canManage) return toast.error('Employees can view agents but cannot edit them');
+        setEditItem(null);
+        setForm(EMPTY);
+        setModal(true);
+    };
     const openEdit = (a) => {
+        if (!canManage) return toast.error('Employees can view agents but cannot edit them');
         setEditItem(a);
         setForm({
             name: a.name || '',
@@ -64,6 +72,7 @@ export default function AgentsPage() {
 
     const handleSave = async (e) => {
         e.preventDefault();
+        if (!canManage) return toast.error('Employees can view agents but cannot edit them');
         setSaving(true);
         try {
             if (editItem) {
@@ -86,6 +95,7 @@ export default function AgentsPage() {
     };
 
     const handleDelete = async (id) => {
+        if (!canManage) return toast.error('Employees can view agents but cannot delete them');
         if (!window.confirm('Delete this agent?')) return;
         try {
             await dbService.deleteAgent(id);
@@ -98,12 +108,14 @@ export default function AgentsPage() {
     };
 
     const openPayment = (a) => {
+        if (!canManage) return toast.error('Employees can view agents but cannot record agent money ops');
         setPaymentAgent(a);
         setPaymentAmount('');
         setPaymentModal(true);
     };
 
     const handleAction = async (type) => {
+        if (!canManage) return toast.error('Employees can view agents but cannot record agent money ops');
         const amt = round2(parseFloat(paymentAmount) || 0);
         if (!amt || amt <= 0) return toast.error('Enter a valid amount');
         const cur = paymentAgent.currency || 'SAR';
@@ -145,6 +157,7 @@ export default function AgentsPage() {
     const baseReferenceId = (referenceId = '') => String(referenceId).replace(/_(src|tgt|coll|dist|conv)$/, '');
 
     const handleEditLedgerEntry = (entry) => {
+        if (!canEditTransactions) return toast.error('Only transaction editors can edit ledger transaction rows');
         if (entry.reference_type !== 'transaction') {
             toast.error('Only transaction rows can be edited here');
             return;
@@ -153,6 +166,10 @@ export default function AgentsPage() {
     };
 
     const handleDeleteLedgerEntry = async (entry) => {
+        if (!canManage) {
+            toast.error('Employees can view ledger rows but cannot delete them');
+            return false;
+        }
         if (!entry?.reference_type || !entry?.reference_id) {
             toast.error('This ledger row has no source record to delete');
             return false;
@@ -208,9 +225,11 @@ export default function AgentsPage() {
                         style={{ maxWidth: '300px' }}
                     />
                 </div>
-                <button id="new-agent-btn" className="btn btn-accent" onClick={openNew}>
-                    <Plus size={16} /> Add Agent
-                </button>
+                {canManage && (
+                    <button id="new-agent-btn" className="btn btn-accent" onClick={openNew}>
+                        <Plus size={16} /> Add Agent
+                    </button>
+                )}
             </div>
 
             {/* Overall Summary Stats - Business Perspective */}
@@ -311,7 +330,7 @@ export default function AgentsPage() {
                                              </td>
                                              <td style={{ textAlign: 'right' }}>
                                                 <div className="flex gap-2 justify-end">
-                                                    {bal !== 0 && (
+                                                    {canManage && bal !== 0 && (
                                                         <button
                                                             className="btn btn-sm"
                                                             style={{ background: '#25D366', color: '#fff', border: 'none', fontWeight: 700 }}
@@ -321,12 +340,16 @@ export default function AgentsPage() {
                                                             <Banknote size={13} /> Receive
                                                         </button>
                                                     )}
-                                                    <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}>
-                                                        <Pencil size={14} />
-                                                    </button>
-                                                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a.$id)}>
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    {canManage && (
+                                                        <>
+                                                            <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}>
+                                                                <Pencil size={14} />
+                                                            </button>
+                                                            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a.$id)}>
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -360,8 +383,8 @@ export default function AgentsPage() {
             <LedgerModal
                 agent={viewingAgent}
                 onClose={() => setViewingAgent(null)}
-                onDeleteEntry={handleDeleteLedgerEntry}
-                onEditEntry={handleEditLedgerEntry}
+                onDeleteEntry={canManage ? handleDeleteLedgerEntry : undefined}
+                onEditEntry={canEditTransactions ? handleEditLedgerEntry : undefined}
             />
 
             {/* Add/Edit Modal */}
@@ -397,7 +420,7 @@ export default function AgentsPage() {
                                             <option value="AED">AED</option>
                                         </select>
                                     </div>
-                                    {canOperate(user?.role) && (
+                                    {canManage && (
                                         <div className="form-group">
                                             <label className="form-label">
                                                 Manual Balance Adjustment ({form.currency})

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { dbService } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import Layout from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { Plus, X, Trash2, TrendingDown, TrendingUp, Download } from 'lucide-react';
 import { format } from 'date-fns';
@@ -11,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { SearchInput, DateRangeFilter, CurrencyFilter, TypeFilter, FilterBar } from '../components/filters';
 import { applyDateRange, createSearchMatcher } from '../utils/filterHelpers';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../constants';
+import { canOperate } from '../utils/roles';
 
 const EMPTY = {
     title: '',
@@ -31,6 +33,8 @@ const TYPE_OPTIONS = [
 ];
 
 export default function ExpensesPage() {
+    const { role } = useAuth();
+    const canManage = canOperate(role);
     const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(false);
@@ -91,6 +95,7 @@ export default function ExpensesPage() {
 
     const handleSave = async (ev) => {
         ev.preventDefault();
+        if (!canManage) return toast.error('Employees can view income and ops but cannot edit them');
         setSaving(true);
         try {
             const amt = parseFloat(form.amount) || 0;
@@ -112,6 +117,7 @@ export default function ExpensesPage() {
     };
 
     const handleDelete = async (id) => {
+        if (!canManage) return toast.error('Employees can view income and ops but cannot delete them');
         if (!window.confirm('Delete this expense?')) return;
         try {
             // ── Remove related ledger entries and rollback balances if any ──
@@ -229,14 +235,16 @@ export default function ExpensesPage() {
                     <button className="btn btn-outline btn-sm" onClick={exportToExcel} title="Export to Excel">
                         <Download size={15} /> Excel
                     </button>
-                    <div className="flex gap-2">
-                        <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
-                            <Plus size={16} /> Add Income
-                        </button>
-                        <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
-                            <Plus size={16} /> Add Expense
-                        </button>
-                    </div>
+                    {canManage && (
+                        <div className="flex gap-2">
+                            <button className="btn btn-accent" onClick={() => { setForm({ ...EMPTY, type: 'income', category: INCOME_CATEGORIES[0] }); setModal(true); }}>
+                                <Plus size={16} /> Add Income
+                            </button>
+                            <button id="new-expense-btn" className="btn btn-danger" onClick={() => { setForm({ ...EMPTY, type: 'expense', category: EXPENSE_CATEGORIES[0] }); setModal(true); }}>
+                                <Plus size={16} /> Add Expense
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -263,7 +271,7 @@ export default function ExpensesPage() {
                                     <th>Currency</th>
                                     <th>Date</th>
                                     <th>Notes</th>
-                                    <th>Actions</th>
+                                    {canManage && <th>Actions</th>}
                                 </tr>
                             </thead>
                             <tbody>
@@ -292,11 +300,13 @@ export default function ExpensesPage() {
                                             {exp.date || (exp.$createdAt ? format(new Date(exp.$createdAt), 'dd MMM yyyy') : '—')}
                                         </td>
                                         <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{exp.notes || '—'}</td>
-                                        <td>
-                                            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(exp.$id)}>
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </td>
+                                        {canManage && (
+                                            <td>
+                                                <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(exp.$id)}>
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </td>
+                                        )}
                                     </tr>
                                 ))}
                             </tbody>

@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authService, dbService, Query } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import {
     Plus, X, Pencil, Trash2, RefreshCw, List, Banknote
@@ -37,6 +38,9 @@ const getConversionMeta = (record = {}) => {
 
 export default function ConversionAgentsPage() {
     const navigate = useNavigate();
+    const { role } = useAuth();
+    const canManage = canOperate(role);
+    const canEditTransactions = canManage || role === 'employee';
     const [agents, setAgents] = useState([]);
     const [convRecs, setConvRecs] = useState([]);   
     const [loading, setLoading] = useState(true);
@@ -54,7 +58,6 @@ export default function ConversionAgentsPage() {
     const [actionRate, setActionRate] = useState('');
     const [depositNote, setDepositNote] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [user, setUser] = useState(null);
 
     const fetchAll = async () => {
         setLoading(true);
@@ -71,11 +74,16 @@ export default function ConversionAgentsPage() {
 
     useEffect(() => {
         fetchAll();
-        authService.getCurrentUser().then(setUser);
     }, []);
 
-    const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
+    const openNew = () => {
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot edit them');
+        setEditItem(null);
+        setForm(EMPTY);
+        setModal(true);
+    };
     const openEdit = (a) => {
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot edit them');
         setEditItem(a);
         setForm({
             name: a.name || '',
@@ -90,6 +98,7 @@ export default function ConversionAgentsPage() {
     };
 
     const openDeposit = (a) => {
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot record money ops');
         setActiveAgent(a);
         setActionAmount('');
         setActionRate('');
@@ -99,6 +108,7 @@ export default function ConversionAgentsPage() {
 
     const handleSave = async (e) => {
         e.preventDefault();
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot edit them');
         setSaving(true);
         try {
             if (editItem) {
@@ -157,6 +167,7 @@ export default function ConversionAgentsPage() {
     };
 
     const handleDeleteConversionRecord = async (record) => {
+        if (!canManage) return toast.error('Employees can view settlements but cannot delete them');
         setSaving(true);
         try {
             await deleteConversionRecord(record);
@@ -168,6 +179,10 @@ export default function ConversionAgentsPage() {
     };
 
     const handleDeleteLedgerEntry = async (entry) => {
+        if (!canManage) {
+            toast.error('Employees can view ledger rows but cannot delete them');
+            return false;
+        }
         if (!entry?.reference_type || !entry?.reference_id) {
             toast.error('This ledger row has no source record to delete');
             return false;
@@ -222,6 +237,7 @@ export default function ConversionAgentsPage() {
     };
 
     const handleEditLedgerEntry = (entry) => {
+        if (!canEditTransactions) return toast.error('Only transaction editors can edit ledger transaction rows');
         if (entry.reference_type !== 'transaction') {
             toast.error('Only transaction rows can be edited here');
             return;
@@ -231,6 +247,7 @@ export default function ConversionAgentsPage() {
     };
 
     const handleDelete = async (agent) => {
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot delete them');
         try {
             const [agentRecs, ledgerRows] = await Promise.all([
                 Promise.resolve(convRecs.filter(r => r.conversion_agent_id === agent.$id)),
@@ -250,6 +267,7 @@ export default function ConversionAgentsPage() {
     };
 
     const handleActionSubmit = async (type) => {
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot record money ops');
         setSaving(true);
         try {
             const amtIn = Number(actionAmount);
@@ -292,6 +310,7 @@ export default function ConversionAgentsPage() {
 
     const handleReceiveSubmit = async (e) => {
         e.preventDefault();
+        if (!canManage) return toast.error('Employees can view conversion agents but cannot settle balances');
         setSaving(true);
         try {
             const amtSource = Number(actionAmount);
@@ -417,9 +436,11 @@ export default function ConversionAgentsPage() {
                         style={{ maxWidth: '300px' }}
                     />
                 </div>
-                <button className="btn btn-accent" onClick={openNew}>
-                    <Plus size={16} /> Add Conversion Agent
-                </button>
+                {canManage && (
+                    <button className="btn btn-accent" onClick={openNew}>
+                        <Plus size={16} /> Add Conversion Agent
+                    </button>
+                )}
             </div>
 
             {loading ? (
@@ -486,8 +507,8 @@ export default function ConversionAgentsPage() {
                                         <th style={{ textAlign: 'right' }}>Business Debit</th>
                                         <th style={{ textAlign: 'right' }}>Business Credit</th>
                                         <th style={{ textAlign: 'right', fontWeight: 800 }}>Net Balance</th>
-                                        <th style={{ textAlign: 'center', width: 200 }} className="hide-sm">Operations</th>
-                                        <th style={{ textAlign: 'right', width: 100 }}>Actions</th>
+                                        {canManage && <th style={{ textAlign: 'center', width: 200 }} className="hide-sm">Operations</th>}
+                                        {canManage && <th style={{ textAlign: 'right', width: 100 }}>Actions</th>}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -521,18 +542,22 @@ export default function ConversionAgentsPage() {
                                                 <td style={{ textAlign: 'right', fontWeight: 900, color: bal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>
                                                     {bal.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{rowCur}</span>
                                                 </td>
-                                                <td style={{ textAlign: 'center' }}>
-                                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                        <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Ops</button>
-                                                        <button className="btn btn-outline btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Settle</button>
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                                                        <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
-                                                        <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
-                                                    </div>
-                                                </td>
+                                                {canManage && (
+                                                    <td style={{ textAlign: 'center' }}>
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                            <button className="btn btn-accent btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => openDeposit(a)}>Ops</button>
+                                                            <button className="btn btn-outline btn-sm" style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => { setActiveAgent(a); setActionAmount(''); setActionRate(''); setReceiveModal(true); }}>Settle</button>
+                                                        </div>
+                                                    </td>
+                                                )}
+                                                {canManage && (
+                                                    <td>
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                                            <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(a)}><Pencil size={13} /></button>
+                                                            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)}><Trash2 size={13} /></button>
+                                                        </div>
+                                                    </td>
+                                                )}
                                             </tr>
                                         );
                                     })}
@@ -543,7 +568,7 @@ export default function ConversionAgentsPage() {
                                         <td style={{ textAlign: 'right', fontWeight: 800, color: '#4a9eff' }}>{debits.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
                                         <td style={{ textAlign: 'right', fontWeight: 800, color: '#ef4444' }}>{credits.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
                                         <td style={{ textAlign: 'right', fontWeight: 900, color: netBal >= 0 ? 'var(--brand-primary)' : '#ef4444' }}>{netBal.toLocaleString()} <span style={{ fontSize: 10 }}>{balCur}</span></td>
-                                        <td colSpan={2}></td>
+                                        {canManage && <td colSpan={2}></td>}
                                     </tr>
                                 </tfoot>
                             </table>
@@ -575,7 +600,7 @@ export default function ConversionAgentsPage() {
                                             <th style={{ textAlign: 'right' }}>Source</th>
                                             <th style={{ textAlign: 'right', width: 120 }}>Rate</th>
                                             <th style={{ textAlign: 'right' }}>Converted</th>
-                                            <th style={{ textAlign: 'right', width: 90 }}>Action</th>
+                                            {canManage && <th style={{ textAlign: 'right', width: 90 }}>Action</th>}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -595,17 +620,19 @@ export default function ConversionAgentsPage() {
                                                     <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--brand-primary)' }}>
                                                         {fmtMoney(meta.targetAmount)} <span style={{ fontSize: 10, opacity: 0.65 }}>{meta.targetCurrency}</span>
                                                     </td>
-                                                    <td style={{ textAlign: 'right' }}>
-                                                        <button
-                                                            type="button"
-                                                            className="btn btn-danger btn-sm btn-icon"
-                                                            title="Delete conversion settlement"
-                                                            disabled={saving}
-                                                            onClick={() => handleDeleteConversionRecord(record)}
-                                                        >
-                                                            <Trash2 size={13} />
-                                                        </button>
-                                                    </td>
+                                                    {canManage && (
+                                                        <td style={{ textAlign: 'right' }}>
+                                                            <button
+                                                                type="button"
+                                                                className="btn btn-danger btn-sm btn-icon"
+                                                                title="Delete conversion settlement"
+                                                                disabled={saving}
+                                                                onClick={() => handleDeleteConversionRecord(record)}
+                                                            >
+                                                                <Trash2 size={13} />
+                                                            </button>
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             );
                                         })}
@@ -622,8 +649,8 @@ export default function ConversionAgentsPage() {
                 <LedgerModal
                     agent={viewingAgent}
                     onClose={() => setViewingAgent(null)}
-                    onDeleteEntry={handleDeleteLedgerEntry}
-                    onEditEntry={handleEditLedgerEntry}
+                    onDeleteEntry={canManage ? handleDeleteLedgerEntry : undefined}
+                    onEditEntry={canEditTransactions ? handleEditLedgerEntry : undefined}
                 />
             )}
 
@@ -668,7 +695,7 @@ export default function ConversionAgentsPage() {
                                         <input className="form-input" placeholder="+966 5X XXX XXXX"
                                             value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                                     </div>
-                                    {canOperate(user?.role) && (
+                                    {canManage && (
                                         <div className="form-group" style={{ flex: 1 }}>
                                             <label className="form-label">Balance ({form.type === 'conversion_sar' ? 'SAR' : 'AED'})</label>
                                             <input className="form-input" type="number" step="any"

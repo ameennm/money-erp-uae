@@ -20,7 +20,13 @@ const NAV = {
         { label: 'Settings', path: '/settings', icon: Settings },
     ],
     employee: [
+        { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { label: 'Transactions', path: '/transactions', icon: ArrowLeftRight },
+        { label: 'Conversion Agents', path: '/conversion-agents', icon: RefreshCw },
+        { label: 'Agents', path: '/agents', icon: Users },
+        { label: 'Distributors', path: '/distributors', icon: UserCog },
+        { label: 'Income & Ops', path: '/expenses', icon: TrendingDown },
+        { label: 'Ledger', path: '/reports', icon: FileSpreadsheet },
     ],
     collector: [
         { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },

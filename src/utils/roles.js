@@ -6,6 +6,6 @@ export const ROLES = {
 
 export const isAdmin = (role) => role === ROLES.ADMIN;
 
-export const isBusinessAdmin = (role) => [ROLES.ADMIN, ROLES.EMPLOYEE].includes(role);
+export const isBusinessAdmin = (role) => role === ROLES.ADMIN;
 
-export const canOperate = (role) => [ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.COLLECTOR].includes(role);
+export const canOperate = (role) => [ROLES.ADMIN, ROLES.COLLECTOR].includes(role);

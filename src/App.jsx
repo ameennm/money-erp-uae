@@ -40,35 +40,35 @@ export default function App() {
 
           {/* All authenticated users */}
           <Route path="/dashboard" element={
-            <ProtectedRoute roles={['admin', 'collector']}><DashboardPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><DashboardPage /></ProtectedRoute>
           } />
           <Route path="/transactions" element={
             <ProtectedRoute><TransactionsPage /></ProtectedRoute>
           } />
 
-          {/* Collector + Admin */}
+          {/* Business visibility */}
           <Route path="/conversion-agents" element={
-            <ProtectedRoute roles={['admin', 'collector']}><ConversionAgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><ConversionAgentsPage /></ProtectedRoute>
           } />
           <Route path="/credits" element={
             <ProtectedRoute roles={['admin', 'collector']}><CreditsPage /></ProtectedRoute>
           } />
 
-          {/* Admin + Collector — agent/employee management */}
+          {/* Business visibility */}
           <Route path="/agents" element={
-            <ProtectedRoute roles={['admin', 'collector']}><AgentsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><AgentsPage /></ProtectedRoute>
           } />
           <Route path="/distributors" element={
-            <ProtectedRoute roles={['admin', 'collector']}><DistributorsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><DistributorsPage /></ProtectedRoute>
           } />
           <Route path="/expenses" element={
-            <ProtectedRoute roles={['admin', 'collector']}><ExpensesPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><ExpensesPage /></ProtectedRoute>
           } />
           <Route path="/reports" element={
-            <ProtectedRoute roles={['admin', 'collector']}><ReportsPage /></ProtectedRoute>
+            <ProtectedRoute roles={['admin', 'collector', 'employee']}><ReportsPage /></ProtectedRoute>
           } />
 
-          {/* Admin + Employee operations */}
+          {/* Admin operations */}
           <Route path="/data-export" element={
             <ProtectedRoute roles={['admin']}><DataExportPage /></ProtectedRoute>
           } />

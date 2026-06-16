@@ -31,6 +31,31 @@ const statusBadge = (s) => {
     return <span className={`badge ${cfg.badge}`}>{cfg.label}</span>;
 };
 
+const fmtLedgerAmount = (amount, currency = '') => {
+    const value = Number(amount || 0).toLocaleString(currency === 'INR' ? 'en-IN' : undefined, { maximumFractionDigits: 2 });
+    return currency === 'INR' ? `₹${value}` : `${value} ${currency}`.trim();
+};
+
+const revisedSuffix = (isRevised) => isRevised ? ' (Revised)' : '';
+
+const distributorLedgerDescription = (tx, isRevised = false) => {
+    const agent = tx.collection_agent_name || 'Unknown agent';
+    const collected = fmtLedgerAmount(tx.collected_amount, tx.collected_currency);
+    return `TX #${tx.tx_id} - INR distributed for ${tx.client_name} | Agent: ${agent} | Collected: ${collected}${revisedSuffix(isRevised)}`;
+};
+
+const collectionAgentLedgerDescription = (tx, isRevised = false) => {
+    const distributor = tx.distributor_name || 'Unknown distributor';
+    const inr = fmtLedgerAmount(tx.inr_requested, 'INR');
+    return `TX #${tx.tx_id} - Collected from ${tx.client_name} | Distributor: ${distributor} | INR: ${inr}${revisedSuffix(isRevised)}`;
+};
+
+const conversionAgentLedgerDescription = (tx, isRevised = false) => {
+    const distributor = tx.distributor_name || 'Unknown distributor';
+    const agent = tx.collection_agent_name || 'Unknown agent';
+    return `TX #${tx.tx_id} - Conversion for ${tx.client_name} | Distributor: ${distributor} | Agent: ${agent}${revisedSuffix(isRevised)}`;
+};
+
 const EMPTY = {
     client_name: '',
     inr_requested: '',
@@ -60,7 +85,8 @@ export default function TransactionsPage() {
     const isAdmin = role === 'admin';
     const isEmployeeOnly = role === 'employee';
     const canCreateTransaction = role === 'collector' || role === 'employee' || isAdmin;
-    const canEditTransaction = role === 'collector' || isAdmin;
+    const canEditTransaction = role === 'collector' || role === 'employee' || isAdmin;
+    const canViewTransactionDetails = isAdmin || isEmployeeOnly;
     const isCollectorOnly = role === 'collector';
 
     const [txs, setTxs] = useState([]);
@@ -252,7 +278,7 @@ export default function TransactionsPage() {
                             type: 'credit', // Agent gave INR to client
                             reference_type: 'transaction',
                             reference_id: editTx.$id,
-                            description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name} (Revised)`
+                            description: distributorLedgerDescription(payload, true)
                         });
                     }
 
@@ -265,7 +291,7 @@ export default function TransactionsPage() {
                             type: 'debit', // Agent received SAR from client
                             reference_type: 'transaction',
                             reference_id: editTx.$id,
-                            description: `TX #${payload.tx_id} - Collected from ${payload.client_name} (Revised)`
+                            description: collectionAgentLedgerDescription(payload, true)
                         });
                     }
 
@@ -279,7 +305,7 @@ export default function TransactionsPage() {
                                 type: 'debit', // Agent received SAR to convert
                                 reference_type: 'transaction',
                                 reference_id: editTx.$id,
-                                description: `TX #${payload.tx_id} - Conversion for ${payload.client_name} (Revised)`
+                                description: conversionAgentLedgerDescription(payload, true)
                             });
                         }
                     }
@@ -364,7 +390,7 @@ export default function TransactionsPage() {
                             amount: payload.inr_requested,
                             currency: 'INR',
                             type: 'credit', // Agent gave INR to client
-                            description: `TX #${payload.tx_id} - Outgoing INR for ${payload.client_name}`
+                            description: distributorLedgerDescription(payload)
                         }));
                     }
 
@@ -377,7 +403,7 @@ export default function TransactionsPage() {
                                 amount: payload.collected_amount,
                                 currency: payload.collected_currency,
                                 type: 'debit', // Agent received SAR from client
-                                description: `TX #${payload.tx_id} - Collected from ${payload.client_name}`
+                                description: collectionAgentLedgerDescription(payload)
                             }));
                         }
                     }
@@ -391,7 +417,7 @@ export default function TransactionsPage() {
                                 amount: payload.collected_amount,
                                 currency: payload.collected_currency,
                                 type: 'debit', // Agent received SAR to convert
-                                description: `TX #${payload.tx_id} - Conversion for ${payload.client_name}`
+                                description: conversionAgentLedgerDescription(payload)
                             }));
                         }
                     }
@@ -521,113 +547,100 @@ export default function TransactionsPage() {
 
     return (
         <Layout title="Transactions">
-            {isEmployeeOnly ? (
-                <div className="card" style={{ maxWidth: 520 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <h3 className="card-title" style={{ margin: 0 }}>Add Transaction</h3>
-                        <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
-                            <Plus size={16} /> New Transaction
+            <FilterBar>
+                <DateRangeFilter
+                    value={dateRange}
+                    onChange={setDateRange}
+                />
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search client or ID..."
+                />
+                <div className="flex gap-2 flex-wrap ml-auto">
+                    {isAdmin && (
+                        <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
+                            <Download size={16} /> Excel
                         </button>
-                    </div>
+                    )}
+                    {canCreateTransaction && (
+                        <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
+                            <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
+                        </button>
+                    )}
                 </div>
-            ) : (
-                <>
-                    <FilterBar>
-                        <DateRangeFilter
-                            value={dateRange}
-                            onChange={setDateRange}
-                        />
-                        <SearchInput
-                            value={search}
-                            onChange={setSearch}
-                            placeholder="Search client or ID..."
-                        />
-                        <div className="flex gap-2 flex-wrap ml-auto">
-                            {isAdmin && (
-                                <button className="btn btn-outline" onClick={exportToExcel} title="Download as Excel">
-                                    <Download size={16} /> Excel
-                                </button>
-                            )}
-                            {canCreateTransaction && (
-                                <button className="btn btn-accent" onClick={() => { setForm(EMPTY); setEditTx(null); setModal(true); }}>
-                                    <Plus size={16} /> <span className="hide-on-mobile">New Transaction</span><span className="show-on-mobile">New</span>
-                                </button>
-                            )}
-                        </div>
-                    </FilterBar>
+            </FilterBar>
 
-                    <div className="card">
-                        <div className="table-wrapper">
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th style={{ width: 100 }}>TX ID</th>
-                                        <th>Client</th>
-                                        <th style={{ textAlign: 'right', width: 140 }}>Requested</th>
-                                        <th style={{ textAlign: 'right', width: 160 }}>Amount</th>
-                                        <th>Agent</th>
-                                        {isAdmin && <th style={{ textAlign: 'right', width: 120 }}>Profit</th>}
-                                        {isAdmin && <th>Distributor</th>}
-                                        <th style={{ width: 120 }}>Status</th>
-                                        <th style={{ width: 100 }}>Actions</th>
+            <div className="card">
+                <div className="table-wrapper">
+                    <table className="data-table">
+                        <thead>
+                            <tr>
+                                <th style={{ width: 100 }}>TX ID</th>
+                                <th>Client</th>
+                                <th style={{ textAlign: 'right', width: 140 }}>Requested</th>
+                                <th style={{ textAlign: 'right', width: 160 }}>Amount</th>
+                                <th>Agent</th>
+                                {canViewTransactionDetails && <th style={{ textAlign: 'right', width: 120 }}>Profit</th>}
+                                {canViewTransactionDetails && <th>Distributor</th>}
+                                <th style={{ width: 120 }}>Status</th>
+                                <th style={{ width: 100 }}>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map(tx => {
+                                const profitVal = Number(tx.profit_inr) || 0;
+                                return (
+                                    <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
+                                        <td className="font-bold">
+                                            #{tx.tx_id}
+                                            {tx.edit_pending_approval && (
+                                                <span style={{ marginLeft: 6, fontSize: 10, background: '#ffaa32', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>PENDING EDIT</span>
+                                            )}
+                                        </td>
+                                        <td>{tx.client_name}</td>
+                                        <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {!tx.is_petty_cash || (tx.distributor_id && tx.inr_requested) ? (
+                                                <>₹{Number(tx.inr_requested || 0).toLocaleString('en-IN')}</>
+                                            ) : '—'}
+                                        </td>
+                                        <td className={`currency ${(tx.collected_currency || 'SAR').toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency || 'SAR'}</span>
+                                        </td>
+                                        <td>{tx.collection_agent_name || '—'}</td>
+                                        {canViewTransactionDetails && (
+                                            <td style={{ textAlign: 'right', color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
+                                                {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')}` : '—'}
+                                            </td>
+                                        )}
+                                        {canViewTransactionDetails && (
+                                            <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                                                {tx.distributor_name || '—'}
+                                            </td>
+                                        )}
+                                        <td>{statusBadge(tx.status)}</td>
+                                        <td>
+                                            <div className="flex gap-2">
+                                                {canEditTransaction && (
+                                                    <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
+                                                )}
+                                                {isAdmin && tx.edit_pending_approval && (
+                                                    <button className="btn btn-sm" style={{ background: '#22c55e', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12 }} onClick={() => handleApproveEdit(tx)} title="Approve Edit">✓ Approve</button>
+                                                )}
+                                                {isAdmin && (
+                                                    <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    {filtered.map(tx => {
-                                        const profitVal = Number(tx.profit_inr) || 0;
-                                        return (
-                                            <tr key={tx.$id} style={tx.edit_pending_approval ? { background: 'rgba(255,170,50,0.06)', outline: '1px solid rgba(255,170,50,0.25)' } : {}}>
-                                                <td className="font-bold">
-                                                    #{tx.tx_id}
-                                                    {tx.edit_pending_approval && (
-                                                        <span style={{ marginLeft: 6, fontSize: 10, background: '#ffaa32', color: '#000', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>PENDING EDIT</span>
-                                                    )}
-                                                </td>
-                                                <td>{tx.client_name}</td>
-                                                <td className="currency inr" style={{ textAlign: 'right', fontWeight: 600 }}>
-                                                    {!tx.is_petty_cash || (tx.distributor_id && tx.inr_requested) ? (
-                                                        <>₹{Number(tx.inr_requested || 0).toLocaleString('en-IN')}</>
-                                                    ) : '—'}
-                                                </td>
-                                                <td className={`currency ${(tx.collected_currency || 'SAR').toLowerCase()}`} style={{ textAlign: 'right', fontWeight: 600 }}>
-                                                    {tx.collected_amount?.toLocaleString()} <span style={{ fontSize: 10, opacity: 0.7 }}>{tx.collected_currency || 'SAR'}</span>
-                                                </td>
-                                                <td>{tx.collection_agent_name || '—'}</td>
-                                                {isAdmin && (
-                                                    <td style={{ textAlign: 'right', color: profitVal > 0 ? 'var(--brand-accent)' : 'var(--text-muted)', fontWeight: profitVal > 0 ? 700 : 400 }}>
-                                                        {profitVal > 0 ? `${profitVal.toLocaleString('en-IN')}` : '—'}
-                                                    </td>
-                                                )}
-                                                {isAdmin && (
-                                                    <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                                                        {tx.distributor_name || '—'}
-                                                    </td>
-                                                )}
-                                                <td>{statusBadge(tx.status)}</td>
-                                                <td>
-                                                    <div className="flex gap-2">
-                                                        {canEditTransaction && (
-                                                            <button className="btn btn-icon btn-sm" onClick={() => openEdit(tx)} title="Edit"><Pencil size={14} /></button>
-                                                        )}
-                                                        {isAdmin && tx.edit_pending_approval && (
-                                                            <button className="btn btn-sm" style={{ background: '#22c55e', color: '#fff', border: 'none', fontWeight: 700, fontSize: 12 }} onClick={() => handleApproveEdit(tx)} title="Approve Edit">✓ Approve</button>
-                                                        )}
-                                                        {isAdmin && (
-                                                            <button className="btn btn-icon btn-sm btn-danger" onClick={() => handleDelete(tx)} title="Delete">
-                                                                <Trash2 size={14} />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </>
-            )}
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             {/* Creation Modal */}
             {modal && (

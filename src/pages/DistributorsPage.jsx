@@ -4,16 +4,21 @@ import { dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { Plus, X, Trash2, UserCog, Pencil } from 'lucide-react';
 import { SearchInput } from '../components/filters';
 import { round2 } from '../utils/filterHelpers';
+import { canOperate } from '../utils/roles';
 
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: 'INR' };
 
 export default function DistributorsPage() {
     const navigate = useNavigate();
+    const { role } = useAuth();
+    const canManage = canOperate(role);
+    const canEditTransactions = canManage || role === 'employee';
     const [distributors, setDistributors] = useState([]);
     const [expenseRecs, setExpenseRecs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -49,10 +54,32 @@ export default function DistributorsPage() {
     };
 
     useEffect(() => { fetchAll(); }, []);
-    const openNew = () => { setEditItem(null); setForm(EMPTY); setModal(true); };
-    const openEdit = (d) => { setEditItem(d); setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 }); setModal(true); };
-    const openDeposit = (d) => { setEditItem(d); setDepositAmount(''); setDepositNote(''); setDepositModal(true); };
-    const openTransfer = (d) => { setTransferFrom(d); setTransferTo(''); setTransferAmount(''); setTransferModal(true); };
+    const openNew = () => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot edit them');
+        setEditItem(null);
+        setForm(EMPTY);
+        setModal(true);
+    };
+    const openEdit = (d) => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot edit them');
+        setEditItem(d);
+        setForm({ name: d.name || '', phone: d.phone || '', notes: d.notes || '', type: 'distributor', currency: 'INR', inr_balance: d.inr_balance || 0 });
+        setModal(true);
+    };
+    const openDeposit = (d) => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot record distributor money ops');
+        setEditItem(d);
+        setDepositAmount('');
+        setDepositNote('');
+        setDepositModal(true);
+    };
+    const openTransfer = (d) => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot transfer balances');
+        setTransferFrom(d);
+        setTransferTo('');
+        setTransferAmount('');
+        setTransferModal(true);
+    };
 
     // ── Business Perspective Summary (INR) ──
     const inrDebits = distributors.reduce((s, d) => s + Math.max(0, d.inr_balance || 0), 0);
@@ -66,6 +93,7 @@ export default function DistributorsPage() {
     const availableINR = Math.max(0, round2(inrIncome - inrGeneralExp - inrDeposited));
 
     const handleAction = async (type) => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot record distributor money ops');
         setSaving(true);
         try {
             const amt = Number(depositAmount);
@@ -116,6 +144,7 @@ export default function DistributorsPage() {
 
     const handleSave = async (e) => {
         e.preventDefault();
+        if (!canManage) return toast.error('Employees can view distributors but cannot edit them');
         setSaving(true);
         try {
             const payload = { ...form };
@@ -146,6 +175,7 @@ export default function DistributorsPage() {
 
     const handleTransfer = async (e) => {
         e.preventDefault();
+        if (!canManage) return toast.error('Employees can view distributors but cannot transfer balances');
         const amt = round2(parseFloat(transferAmount) || 0);
         if (!amt || amt <= 0) return toast.error('Enter a valid amount');
         if (!transferTo) return toast.error('Select a target distributor');
@@ -213,6 +243,7 @@ export default function DistributorsPage() {
 
 
     const handleDelete = async (id) => {
+        if (!canManage) return toast.error('Employees can view distributors but cannot delete them');
         if (!window.confirm('Remove this distributor record?')) return;
         try {
             await dbService.deleteAgent(id);
@@ -227,6 +258,7 @@ export default function DistributorsPage() {
     const baseReferenceId = (referenceId = '') => String(referenceId).replace(/_(src|tgt|coll|dist|conv)$/, '');
 
     const handleEditLedgerEntry = (entry) => {
+        if (!canEditTransactions) return toast.error('Only transaction editors can edit ledger transaction rows');
         if (entry.reference_type !== 'transaction') {
             toast.error('Only transaction rows can be edited here');
             return;
@@ -235,6 +267,10 @@ export default function DistributorsPage() {
     };
 
     const handleDeleteLedgerEntry = async (entry) => {
+        if (!canManage) {
+            toast.error('Employees can view ledger rows but cannot delete them');
+            return false;
+        }
         if (!entry?.reference_type || !entry?.reference_id) {
             toast.error('This ledger row has no source record to delete');
             return false;
@@ -284,9 +320,11 @@ export default function DistributorsPage() {
                         style={{ maxWidth: '300px' }}
                     />
                 </div>
-                <button id="new-dist-btn" className="btn btn-accent" onClick={openNew}>
-                    <Plus size={16} /> Add Distributor
-                </button>
+                {canManage && (
+                    <button id="new-dist-btn" className="btn btn-accent" onClick={openNew}>
+                        <Plus size={16} /> Add Distributor
+                    </button>
+                )}
             </div>
 
             {/* Business Ledger Summary */}
@@ -368,23 +406,27 @@ export default function DistributorsPage() {
                                              </td>
                                              <td style={{ textAlign: 'right' }}>
                                                  <div className="flex gap-2 justify-end">
-                                                    <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)} style={{ padding: '4px 10px', fontSize: 12 }}>
-                                                        Money Ops
-                                                    </button>
-                                                    <button
-                                                        className="btn btn-outline btn-sm"
-                                                        style={{ color: '#a78bfa', borderColor: '#a78bfa' }}
-                                                        onClick={() => openTransfer(dist)}
-                                                        title="Transfer balance to another distributor"
-                                                    >
-                                                        Transfer
-                                                    </button>
-                                                    <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(dist)}>
-                                                        <Pencil size={14} />
-                                                    </button>
-                                                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(dist.$id)}>
-                                                        <Trash2 size={14} />
-                                                    </button>
+                                                    {canManage && (
+                                                        <>
+                                                            <button className="btn btn-accent btn-sm" onClick={() => openDeposit(dist)} style={{ padding: '4px 10px', fontSize: 12 }}>
+                                                                Money Ops
+                                                            </button>
+                                                            <button
+                                                                className="btn btn-outline btn-sm"
+                                                                style={{ color: '#a78bfa', borderColor: '#a78bfa' }}
+                                                                onClick={() => openTransfer(dist)}
+                                                                title="Transfer balance to another distributor"
+                                                            >
+                                                                Transfer
+                                                            </button>
+                                                            <button className="btn btn-outline btn-sm btn-icon" onClick={() => openEdit(dist)}>
+                                                                <Pencil size={14} />
+                                                            </button>
+                                                            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(dist.$id)}>
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -409,8 +451,8 @@ export default function DistributorsPage() {
             <LedgerModal 
                 agent={viewingDist} 
                 onClose={() => setViewingDist(null)} 
-                onDeleteEntry={handleDeleteLedgerEntry}
-                onEditEntry={handleEditLedgerEntry}
+                onDeleteEntry={canManage ? handleDeleteLedgerEntry : undefined}
+                onEditEntry={canEditTransactions ? handleEditLedgerEntry : undefined}
             />
 
             {/* Modal */}
