@@ -36,24 +36,29 @@ const fmtLedgerAmount = (amount, currency = '') => {
     return currency === 'INR' ? `₹${value}` : `${value} ${currency}`.trim();
 };
 
+const collectionRateSegment = (tx) => {
+    if (!tx.collection_rate) return '';
+    return ` | Rate: ${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR`.trimEnd();
+};
+
 const revisedSuffix = (isRevised) => isRevised ? ' (Revised)' : '';
 
 const distributorLedgerDescription = (tx, isRevised = false) => {
     const agent = tx.collection_agent_name || 'Unknown agent';
     const collected = fmtLedgerAmount(tx.collected_amount, tx.collected_currency);
-    return `TX #${tx.tx_id} - INR distributed for ${tx.client_name} | Agent: ${agent} | Collected: ${collected}${revisedSuffix(isRevised)}`;
+    return `TX #${tx.tx_id} - INR distributed for ${tx.client_name} | Agent: ${agent} | Collected: ${collected}${collectionRateSegment(tx)}${revisedSuffix(isRevised)}`;
 };
 
 const collectionAgentLedgerDescription = (tx, isRevised = false) => {
     const distributor = tx.distributor_name || 'Unknown distributor';
     const inr = fmtLedgerAmount(tx.inr_requested, 'INR');
-    return `TX #${tx.tx_id} - Collected from ${tx.client_name} | Distributor: ${distributor} | INR: ${inr}${revisedSuffix(isRevised)}`;
+    return `TX #${tx.tx_id} - Collected from ${tx.client_name} | Distributor: ${distributor} | INR: ${inr}${collectionRateSegment(tx)}${revisedSuffix(isRevised)}`;
 };
 
 const conversionAgentLedgerDescription = (tx, isRevised = false) => {
     const distributor = tx.distributor_name || 'Unknown distributor';
     const agent = tx.collection_agent_name || 'Unknown agent';
-    return `TX #${tx.tx_id} - Conversion for ${tx.client_name} | Distributor: ${distributor} | Agent: ${agent}${revisedSuffix(isRevised)}`;
+    return `TX #${tx.tx_id} - Conversion for ${tx.client_name} | Distributor: ${distributor} | Agent: ${agent}${collectionRateSegment(tx)}${revisedSuffix(isRevised)}`;
 };
 
 const EMPTY = {

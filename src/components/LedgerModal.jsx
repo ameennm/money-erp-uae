@@ -26,6 +26,11 @@ const fmtTransactionAmount = (amount, currency) => {
     return currency === 'INR' ? `₹${value}` : `${value} ${currency || ''}`.trim();
 };
 
+const fmtCollectionRate = (tx) => {
+    if (!tx?.collection_rate) return '';
+    return `${tx.collection_rate} ${tx.collected_currency || ''}/1000 INR`.trim();
+};
+
 const appendTransactionContext = (description = '', details = []) => {
     const lowerDescription = description.toLowerCase();
     const extras = details
@@ -44,11 +49,13 @@ const ledgerParticularWithTransaction = (entry, tx, agent) => {
     const isConversionAgentRow = agent?.$id === tx.conversion_agent_id;
     const collected = fmtTransactionAmount(tx.collected_amount, tx.collected_currency);
     const inr = fmtTransactionAmount(tx.inr_requested, 'INR');
+    const collectionRate = fmtCollectionRate(tx);
 
     if (isDistributorRow) {
         return appendTransactionContext(entry.description, [
             { label: 'Agent', value: tx.collection_agent_name },
             { label: 'Collected', value: collected },
+            { label: 'Rate', value: collectionRate },
             { label: 'Conversion', value: tx.conversion_agent_name },
         ]);
     }
@@ -57,6 +64,7 @@ const ledgerParticularWithTransaction = (entry, tx, agent) => {
         return appendTransactionContext(entry.description, [
             { label: 'Distributor', value: tx.distributor_name },
             { label: 'INR', value: inr },
+            { label: 'Rate', value: collectionRate },
             { label: 'Conversion', value: tx.conversion_agent_name },
         ]);
     }
@@ -66,12 +74,14 @@ const ledgerParticularWithTransaction = (entry, tx, agent) => {
             { label: 'Distributor', value: tx.distributor_name },
             { label: 'Agent', value: tx.collection_agent_name },
             { label: 'INR', value: inr },
+            { label: 'Rate', value: collectionRate },
         ]);
     }
 
     return appendTransactionContext(entry.description, [
         { label: 'Agent', value: tx.collection_agent_name },
         { label: 'Distributor', value: tx.distributor_name },
+        { label: 'Rate', value: collectionRate },
     ]);
 };
 
