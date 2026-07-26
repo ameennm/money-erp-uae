@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 // Filter components
 import { SearchInput, DateRangeFilter, CurrencyFilter, TypeFilter, FilterBar } from '../components/filters';
 import { applyDateRange } from '../utils/filterHelpers';
+import { buildConversionSourceDebitMap, getConversionMeta } from '../utils/conversionLedger';
 
 const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
@@ -20,36 +21,6 @@ const ALL_CURRENCIES = ['SAR', 'AED', 'INR'];
 
 const isInternalLedgerTransfer = (entry) => entry.category === 'Distributor Deposit' || entry.category === 'Distributor Transfer';
 const closeEnough = (a, b, tolerance = 0.05) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= tolerance;
-const hasAmountCombination = (amounts = [], target, tolerance = 0.05) => {
-    const targetCents = Math.round((Number(target) || 0) * 100);
-    const toleranceCents = Math.ceil(tolerance * 100);
-    const sums = new Set([0]);
-
-    for (const amount of amounts) {
-        const amountCents = Math.round((Number(amount) || 0) * 100);
-        if (amountCents <= 0) continue;
-
-        for (const sum of [...sums]) {
-            const next = sum + amountCents;
-            if (Math.abs(next - targetCents) <= toleranceCents) return true;
-            if (next < targetCents + toleranceCents) sums.add(next);
-        }
-    }
-
-    return false;
-};
-
-const getConversionMeta = (conversion = {}) => {
-    const sourceCurrency = conversion.source_currency || (Number(conversion.sar_amount || 0) > 0 ? 'SAR' : 'AED');
-    const targetCurrency = conversion.target_currency || (sourceCurrency === 'SAR' ? 'AED' : 'INR');
-    const sourceAmount = sourceCurrency === 'SAR' ? Number(conversion.sar_amount || 0) : Number(conversion.aed_amount || 0);
-    const targetAmount = targetCurrency === 'AED'
-        ? Number(conversion.aed_amount || 0)
-        : Number(conversion.profit_inr || 0);
-    const rate = sourceCurrency === 'SAR' ? conversion.sar_rate : conversion.aed_rate;
-
-    return { sourceCurrency, targetCurrency, sourceAmount, targetAmount, rate };
-};
 
 const isLinkedConversionReceipt = (expense, conversions = []) => {
     if (expense.category !== 'Conversion Receipt') return false;
@@ -62,38 +33,6 @@ const isLinkedConversionReceipt = (expense, conversions = []) => {
         if (expense.currency !== meta.targetCurrency) return false;
         return closeEnough(expense.amount, meta.targetAmount);
     });
-};
-
-const hasMatchingConversionFund = (conversion, expenses = []) => {
-    const meta = getConversionMeta(conversion);
-    const matchingFunds = expenses.filter(exp => {
-        if (exp.category !== 'Conversion Fund Ops') return false;
-        if (exp.type === 'income') return false;
-        if (exp.distributor_id !== conversion.conversion_agent_id) return false;
-        if (conversion.date && exp.date && conversion.date !== exp.date) return false;
-        if (exp.currency !== meta.sourceCurrency) return false;
-        return Number(exp.amount || 0) > 0;
-    });
-
-    return matchingFunds.some(exp => closeEnough(exp.amount, meta.sourceAmount))
-        || hasAmountCombination(matchingFunds.map(exp => exp.amount), meta.sourceAmount);
-};
-
-const getLedgerTargetAmount = (conversion, expenses = []) => {
-    const meta = getConversionMeta(conversion);
-    if (meta.targetCurrency !== 'AED') return meta.targetAmount;
-
-    const matchingDebit = expenses
-        .filter(exp => {
-            if (exp.category !== 'Conversion Fund Ops') return false;
-            if (exp.type === 'income') return false;
-            if (exp.currency !== meta.targetCurrency) return false;
-            if (conversion.date && exp.date && conversion.date !== exp.date) return false;
-            return closeEnough(exp.amount, meta.targetAmount, 5);
-        })
-        .sort((a, b) => Math.abs(Number(a.amount || 0) - meta.targetAmount) - Math.abs(Number(b.amount || 0) - meta.targetAmount))[0];
-
-    return matchingDebit ? Number(matchingDebit.amount || 0) : meta.targetAmount;
 };
 
 export default function ReportsPage() {
@@ -128,6 +67,7 @@ export default function ReportsPage() {
     // Build unified ledger entries
     const allEntries = useMemo(() => {
         const entries = [];
+        const conversionSourceDebitMap = buildConversionSourceDebitMap(aedConversions, expenses);
 
         if (typeFilter.includes('income')) {
             expenses
@@ -152,11 +92,8 @@ export default function ReportsPage() {
             // the source debit is recorded when money is given to the conversion agent.
             aedConversions.forEach(c => {
                 const meta = getConversionMeta(c);
-                const targetAmount = getLedgerTargetAmount(c, expenses);
+                const targetAmount = meta.targetAmount;
                 if (!targetAmount) return;
-                const adjustedNote = closeEnough(targetAmount, meta.targetAmount)
-                    ? ''
-                    : ` (calculated ${fmt(meta.targetAmount)} ${meta.targetCurrency})`;
 
                 entries.push({
                     _type: 'income',
@@ -169,7 +106,7 @@ export default function ReportsPage() {
                     debit: 0,
                     agent: c.conversion_agent_name || '',
                     rate: meta.rate || '',
-                    notes: `Converted from ${fmt(meta.sourceAmount)} ${meta.sourceCurrency}${adjustedNote}`,
+                    notes: `Converted from ${fmt(meta.sourceAmount)} ${meta.sourceCurrency}`,
                 });
             });
         }
@@ -195,7 +132,8 @@ export default function ReportsPage() {
 
             aedConversions.forEach(c => {
                 const meta = getConversionMeta(c);
-                if (!meta.sourceAmount || hasMatchingConversionFund(c, expenses)) return;
+                const sourceDebitAmount = conversionSourceDebitMap.get(c.$id) ?? meta.sourceAmount;
+                if (!sourceDebitAmount) return;
 
                 entries.push({
                     _type: 'expense',
@@ -205,10 +143,12 @@ export default function ReportsPage() {
                     txId: '',
                     currency: meta.sourceCurrency,
                     credit: 0,
-                    debit: meta.sourceAmount,
+                    debit: sourceDebitAmount,
                     agent: c.conversion_agent_name || '',
                     rate: meta.rate || '',
-                    notes: 'Source amount for conversion',
+                    notes: closeEnough(sourceDebitAmount, meta.sourceAmount)
+                        ? 'Source amount for conversion'
+                        : `Unfunded source amount for conversion (total source ${fmt(meta.sourceAmount)} ${meta.sourceCurrency})`,
                 });
             });
         }
