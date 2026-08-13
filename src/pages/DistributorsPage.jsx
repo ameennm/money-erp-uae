@@ -10,6 +10,7 @@ import { Plus, X, Trash2, UserCog, Pencil } from 'lucide-react';
 import { SearchInput } from '../components/filters';
 import { round2 } from '../utils/filterHelpers';
 import { canOperate } from '../utils/roles';
+import { isDistributorAgent } from '../utils/agentTypes';
 
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'distributor', currency: 'INR' };
@@ -44,7 +45,7 @@ export default function DistributorsPage() {
                 dbService.listAgents([Query.equal('type', 'distributor')]),
                 dbService.listExpenses(),
             ]);
-            setDistributors(dr.documents);
+            setDistributors(dr.documents.filter(isDistributorAgent));
             setExpenseRecs(ex.documents);
         } catch (e) {
             toast.error(e.message);
@@ -85,6 +86,14 @@ export default function DistributorsPage() {
     const inrDebits = distributors.reduce((s, d) => s + Math.max(0, d.inr_balance || 0), 0);
     const inrCredits = distributors.reduce((s, d) => s + Math.abs(Math.min(0, d.inr_balance || 0)), 0);
     const netInr = inrDebits - inrCredits;
+    const searchText = searchTerm.trim().toLowerCase();
+    const visibleDistributors = distributors
+        .filter(isDistributorAgent)
+        .filter(d => (
+            !searchText
+            || d.name?.toLowerCase().includes(searchText)
+            || d.phone?.toLowerCase().includes(searchText)
+        ));
 
     // Available INR pool logic
     const inrIncome = round2(expenseRecs.filter(e => e.type === 'income' && e.currency === 'INR').reduce((a, e) => a + (Number(e.amount) || 0), 0));
@@ -370,11 +379,7 @@ export default function DistributorsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {distributors
-                                    .filter(d => 
-                                        d.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                        d.phone?.toLowerCase().includes(searchTerm.toLowerCase())
-                                    )
+                                {visibleDistributors
                                     .map((dist, i) => {
                                     const bal = round2(dist.inr_balance || 0);
                                     const debit = bal > 0 ? bal : 0;

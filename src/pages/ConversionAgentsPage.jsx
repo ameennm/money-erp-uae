@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { SearchInput } from '../components/filters';
 import { canOperate } from '../utils/roles';
+import { isConversionAgent } from '../utils/agentTypes';
 
 const EMPTY = { name: '', phone: '', notes: '', type: 'conversion_sar', currency: 'AED', sar_balance: 0, aed_balance: 0 };
 const CONV_TYPES = [
@@ -66,7 +67,7 @@ export default function ConversionAgentsPage() {
                 dbService.listAgents([Query.or([Query.equal('type', 'conversion_sar'), Query.equal('type', 'conversion_aed'), Query.equal('type', 'conversion')])]),
                 dbService.listAedConversions(),
             ]);
-            setAgents(ar.documents);
+            setAgents(ar.documents.filter(isConversionAgent));
             setConvRecs(cr.documents);
         } catch (e) { toast.error(e.message); }
         finally { setLoading(false); }
@@ -377,16 +378,21 @@ export default function ConversionAgentsPage() {
     };
 
     // ── Business Perspective Summary ──
+    const searchText = searchTerm.trim().toLowerCase();
     const currentAgents = agents.filter(a => a.type === activeTab);
+    const visibleAgents = currentAgents.filter(a => (
+        !searchText
+        || a.name?.toLowerCase().includes(searchText)
+        || a.phone?.toLowerCase().includes(searchText)
+    ));
     const balCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
     const currentAgentIds = useMemo(() => new Set(currentAgents.map(a => a.$id)), [currentAgents]);
     const visibleConversionRecords = useMemo(() => {
-        const search = searchTerm.toLowerCase();
         return convRecs
             .filter(r => currentAgentIds.has(r.conversion_agent_id))
-            .filter(r => !search || r.conversion_agent_name?.toLowerCase().includes(search))
+            .filter(r => !searchText || r.conversion_agent_name?.toLowerCase().includes(searchText))
             .sort((a, b) => new Date(b.date || b.$createdAt || 0) - new Date(a.date || a.$createdAt || 0));
-    }, [convRecs, currentAgentIds, searchTerm]);
+    }, [convRecs, currentAgentIds, searchText]);
 
     const settlementPreview = useMemo(() => {
         if (!activeAgent) return null;
@@ -512,9 +518,7 @@ export default function ConversionAgentsPage() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {agents
-                                        .filter(a => a.type === activeTab)
-                                        .filter(a => a.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+                                    {visibleAgents
                                         .map((a, i) => {
                                         const bal = activeTab === 'conversion_sar' ? (a.sar_balance || 0) : (a.aed_balance || 0);
                                         const rowCur = activeTab === 'conversion_sar' ? 'SAR' : 'AED';
