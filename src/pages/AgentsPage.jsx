@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { dbService } from '../lib/appwrite';
+import { dbService, Query } from '../lib/appwrite';
 import { ledgerService } from '../lib/ledgerService';
 import LedgerModal from '../components/LedgerModal';
 import Layout from '../components/Layout';
@@ -10,6 +10,7 @@ import { Plus, X, Pencil, Trash2, Users, Banknote } from 'lucide-react';
 import { SearchInput } from '../components/filters';
 import { round2 } from '../utils/filterHelpers';
 import { canOperate } from '../utils/roles';
+import { isCollectionAgent } from '../utils/agentTypes';
 
 const EMPTY = { name: '', phone: '', location: '', notes: '', currency: 'SAR', type: 'collection', sar_balance: 0, aed_balance: 0 };
 
@@ -33,8 +34,14 @@ export default function AgentsPage() {
     const fetch = async () => {
         setLoading(true);
         try {
-            const ar = await dbService.listAgents(); // Fetch all agents for universal search
-            setAgents(ar.documents);
+            const ar = await dbService.listAgents([
+                Query.or([
+                    Query.equal('type', 'collection'),
+                    Query.equal('type', 'collection_sar'),
+                    Query.equal('type', 'collection_aed'),
+                ]),
+            ]);
+            setAgents(ar.documents.filter(isCollectionAgent));
         } catch (e) {
             toast.error(e.message);
         } finally {
@@ -204,6 +211,15 @@ export default function AgentsPage() {
 
 
     // ── Business Perspective Summary (SAR & AED) ──
+    const searchText = searchTerm.trim().toLowerCase();
+    const visibleAgents = agents
+        .filter(isCollectionAgent)
+        .filter(a => (
+            !searchText
+            || a.name?.toLowerCase().includes(searchText)
+            || a.phone?.toLowerCase().includes(searchText)
+        ));
+
     const sarDebits = agents.filter(a => a.currency !== 'AED').reduce((s, a) => s + Math.max(0, a.sar_balance || 0), 0);
     const sarCredits = agents.filter(a => a.currency !== 'AED').reduce((s, a) => s + Math.abs(Math.min(0, a.sar_balance || 0)), 0);
     const aedDebits = agents.filter(a => a.currency === 'AED').reduce((s, a) => s + Math.max(0, a.aed_balance || 0), 0);
@@ -282,14 +298,7 @@ export default function AgentsPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {agents
-                                    .filter(a => {
-                                        if (searchTerm) {
-                                            return a.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                                   a.phone?.toLowerCase().includes(searchTerm.toLowerCase());
-                                        }
-                                        return a.type === 'collection';
-                                    })
+                                {visibleAgents
                                     .map((a, i) => {
                                     const cur = a.currency || 'SAR';
                                     const balField = cur === 'AED' ? 'aed_balance' : 'sar_balance';

@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 // Filter components
 import { SearchInput, DateRangeFilter, FilterBar } from '../components/filters';
 import { applyDateRange, round2 } from '../utils/filterHelpers';
+import { isCollectionAgent, isDistributorAgent } from '../utils/agentTypes';
 import { TRANSACTION_STATUSES } from '../constants';
 
 const START_TX_NUM = 20261;
@@ -702,10 +703,10 @@ export default function TransactionsPage() {
                                                 }}>
                                                 <option value="">General Petty Cash (No Ledger)</option>
                                                 <optgroup label="Agents">
-                                                    {agents.filter(a => a.type !== 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
+                                                    {agents.filter(isCollectionAgent).map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
                                                 </optgroup>
                                                 <optgroup label="Distributors">
-                                                    {agents.filter(a => a.type === 'distributor').map(d => <option key={d.$id} value={d.$id}>{d.name} (INR)</option>)}
+                                                    {agents.filter(isDistributorAgent).map(d => <option key={d.$id} value={d.$id}>{d.name} (INR)</option>)}
                                                 </optgroup>
                                             </select>
                                         </div>
@@ -763,7 +764,7 @@ export default function TransactionsPage() {
                                                         });
                                                     }}>
                                                     <option value="">Select Agent</option>
-                                                    {agents.filter(a => a.type.startsWith('collection')).map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
+                                                    {agents.filter(isCollectionAgent).map(a => <option key={a.$id} value={a.$id}>{a.name} ({a.currency || 'SAR'})</option>)}
                                                 </select>
                                             </div>
                                         </div>
@@ -829,7 +830,7 @@ export default function TransactionsPage() {
                                                         });
                                                     }}>
                                                     <option value="">Select Distributor</option>
-                                                    {agents.filter(a => a.type === 'distributor').map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
+                                                    {agents.filter(isDistributorAgent).map(a => <option key={a.$id} value={a.$id}>{a.name} (Bal: ₹{round2(a.inr_balance || 0).toLocaleString('en-IN')})</option>)}
                                                 </select>
                                             </div>
                                         </div>
